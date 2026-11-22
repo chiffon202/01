@@ -1,11 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  --background: #fffbf2;
+  --background: #f6f5f2;
   --foreground: #1c1917;
   --surface: #ffffff;
-  --surface-muted: #f7efe0;
-  --border-warm: #e9dfce;
+  --surface-subtle: #faf9f7;
+  --border-subtle: #e7e5e0;
 }
 
 @theme inline {
@@ -24,6 +24,7 @@ body {
   color: var(--foreground);
   font-family: var(--font-jakarta), var(--font-thai), system-ui, -apple-system, sans-serif;
   overscroll-behavior-y: contain;
+  -webkit-font-smoothing: antialiased;
 }
 
 button,
@@ -36,4 +37,13 @@ textarea {
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+/* Hide scrollbars on horizontal filter chips cleanly */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }

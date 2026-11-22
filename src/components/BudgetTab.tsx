@@ -1,20 +1,21 @@
 "use client";
 
 import React, { useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   Banknote,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   ClipboardCheck,
   ClipboardCopy,
   Download,
   Pencil,
   Plus,
-  Receipt,
   Settings2,
   Trash2,
-  TrendingUp,
   Upload,
   Wallet,
   X,
@@ -43,6 +44,7 @@ interface BudgetTabProps {
   onClearOrdersOnly: () => void;
   onExportJson: () => void;
   onImportJson: (raw: string) => void;
+  onNotify: (message: string, tone?: "success" | "error") => void;
 }
 
 type SalesFilter = "today" | "all" | string; // 'today' | 'all' | YYYY-MM-DD
@@ -59,8 +61,8 @@ export function BudgetTab({
   onClearOrdersOnly,
   onExportJson,
   onImportJson,
+  onNotify,
 }: BudgetTabProps) {
-
   // Budget limit inline editor
   const [editingBudget, setEditingBudget] = useState(false);
   const [budgetDraft, setBudgetDraft] = useState(String(settings.budgetLimit));
@@ -78,19 +80,15 @@ export function BudgetTab({
   const [editExpenseTitle, setEditExpenseTitle] = useState("");
   const [editExpenseAmount, setEditExpenseAmount] = useState("");
 
-  // Settings & Backup section
-  const [toolsOpen, setToolsOpen] = useState(false);
+  // Menu & Price editor (collapsible)
+  const [menuEditorOpen, setMenuEditorOpen] = useState(false);
   const [newMenuName, setNewMenuName] = useState("");
   const [newMenuPrice, setNewMenuPrice] = useState("");
   const [newToppingName, setNewToppingName] = useState("");
   const [newToppingPrice, setNewToppingPrice] = useState("");
 
-  // Clear test bills modal + import status
+  // Clear test bills confirmation modal
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
-  const [backupMessage, setBackupMessage] = useState<{
-    type: "ok" | "err";
-    text: string;
-  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // --------------------------------------------------------------------------
@@ -154,7 +152,6 @@ export function BudgetTab({
     const menuCounts = new Map<string, number>();
     const toppingCounts = new Map<string, number>();
 
-    // Seed configured toppings so even 0 count toppings display neatly
     for (const t of settings.toppings) {
       toppingCounts.set(t.name, 0);
     }
@@ -260,7 +257,8 @@ export function BudgetTab({
     }
 
     setCopiedSummary(true);
-    window.setTimeout(() => setCopiedSummary(false), 2200);
+    onNotify("คัดลอกสรุปยอดสำหรับส่ง LINE แล้ว");
+    window.setTimeout(() => setCopiedSummary(false), 2000);
   };
 
   // --------------------------------------------------------------------------
@@ -270,6 +268,7 @@ export function BudgetTab({
     const parsed = Number(budgetDraft);
     if (!Number.isNaN(parsed) && parsed >= 0) {
       onUpdateSettings({ ...settings, budgetLimit: Math.round(parsed) });
+      onNotify(`อัปเดตเพดานงบเป็น ฿${formatBaht(parsed)} แล้ว`);
     }
     setEditingBudget(false);
   };
@@ -320,7 +319,7 @@ export function BudgetTab({
   const handleToggleMenuActive = (menuId: string) => {
     const activeCount = settings.menus.filter((m) => m.active).length;
     const target = settings.menus.find((m) => m.id === menuId);
-    if (target?.active && activeCount <= 1) return; // keep at least 1 active menu
+    if (target?.active && activeCount <= 1) return;
     onUpdateSettings({
       ...settings,
       menus: settings.menus.map((m) =>
@@ -348,6 +347,7 @@ export function BudgetTab({
     });
     setNewMenuName("");
     setNewMenuPrice("");
+    onNotify(`เพิ่มเมนู "${name}" แล้ว`);
   };
 
   const handleUpdateToppingPrice = (toppingId: string, rawPrice: string) => {
@@ -398,6 +398,7 @@ export function BudgetTab({
     });
     setNewToppingName("");
     setNewToppingPrice("");
+    onNotify(`เพิ่มท็อปปิ้ง "+${name}" แล้ว`);
   };
 
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -406,40 +407,100 @@ export function BudgetTab({
     try {
       const text = await file.text();
       onImportJson(text);
-      setBackupMessage({
-        type: "ok",
-        text: "นำเข้าข้อมูลสำรอง JSON สำเร็จแล้ว",
-      });
+      onNotify("นำเข้าข้อมูลสำรอง JSON สำเร็จแล้ว");
     } catch (err) {
-      setBackupMessage({
-        type: "err",
-        text:
-          err instanceof Error ? err.message : "ไม่สามารถอ่านไฟล์ JSON ได้",
-      });
+      onNotify(
+        err instanceof Error ? err.message : "ไม่สามารถอ่านไฟล์ JSON ได้",
+        "error"
+      );
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
-      window.setTimeout(() => setBackupMessage(null), 3500);
     }
   };
+
+  const handleConfirmClearOrders = () => {
+    onClearOrdersOnly();
+    setConfirmClearOpen(false);
+    setSalesFilter("today");
+  };
+
+  const confirmModal =
+    confirmClearOpen && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="clear-orders-title"
+            onClick={() => setConfirmClearOpen(false)}
+            className="fixed inset-0 z-[100] bg-stone-950/45 flex items-center justify-center p-4"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm rounded-3xl bg-white border border-stone-200 shadow-2xl p-5 space-y-4"
+            >
+              <div className="flex items-start gap-3">
+                <span className="w-10 h-10 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </span>
+                <div className="space-y-1">
+                  <h3
+                    id="clear-orders-title"
+                    className="text-base font-semibold text-stone-900"
+                  >
+                    ล้างเฉพาะบิลทดสอบ?
+                  </h3>
+                  <p className="text-xs text-stone-600 leading-relaxed">
+                    ระบบจะลบออเดอร์ทั้งหมด{" "}
+                    <strong className="text-stone-900">
+                      ({orders.length} บิล)
+                    </strong>{" "}
+                    และรีเซ็ตคิวกลับเป็น{" "}
+                    <strong className="text-stone-900">#01</strong> แต่จะ
+                    <strong className="text-emerald-700">
+                      ไม่ลบรายการรายจ่าย ({expenses.length} รายการ · ฿
+                      {formatBaht(totalExpenses)})
+                    </strong>{" "}
+                    และเมนูของคุณ
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setConfirmClearOpen(false)}
+                  className="min-h-[46px] rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-semibold active:scale-[0.98]"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmClearOrders}
+                  className="min-h-[46px] rounded-2xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold active:scale-[0.98]"
+                >
+                  ยืนยันล้างบิล
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
 
   return (
     <div className="space-y-5">
       {/* =================================================================== */}
-      {/* 1. BUDGET CONTROL & BREAK-EVEN CARD                                 */}
+      {/* 1. BUDGET CONTROL & BREAK-EVEN CARD (CLEAN, ZERO NESTED BOXES)      */}
       {/* =================================================================== */}
       <section
         aria-label="คุมงบประมาณและจุดคุ้มทุน"
-        className="rounded-3xl bg-white border border-[#E9DFCE] shadow-[0_6px_24px_-8px_rgba(120,74,12,0.12)] p-4 sm:p-5 space-y-4"
+        className="rounded-3xl bg-white border border-stone-200/80 shadow-[0_2px_14px_-4px_rgba(28,25,23,0.06)] p-5 space-y-5"
       >
+        {/* Header & Editable Budget Cap */}
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center">
-              <TrendingUp className="w-4 h-4" />
-            </span>
-            <h2 className="text-base font-extrabold text-stone-900">
-              คุมงบ &amp; จุดคุ้มทุน
-            </h2>
-          </div>
+          <h2 className="text-base font-semibold text-stone-900">
+            คุมงบ &amp; จุดคุ้มทุน
+          </h2>
 
           {!editingBudget ? (
             <button
@@ -448,10 +509,10 @@ export function BudgetTab({
                 setBudgetDraft(String(settings.budgetLimit));
                 setEditingBudget(true);
               }}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#FAF5EB] hover:bg-amber-100 border border-[#E9DFCE] text-xs font-bold text-stone-700"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-stone-100 hover:bg-stone-200/70 text-xs font-medium text-stone-700 transition-colors"
             >
-              <Pencil className="w-3.5 h-3.5" />
-              เพดานงบ ฿{formatBaht(budgetLimit)}
+              <Pencil className="w-3 h-3 text-stone-500" />
+              งบตั้งต้น ฿{formatBaht(budgetLimit)}
             </button>
           ) : (
             <div className="flex items-center gap-1.5">
@@ -460,20 +521,21 @@ export function BudgetTab({
                 inputMode="numeric"
                 value={budgetDraft}
                 onChange={(e) => setBudgetDraft(e.target.value)}
-                className="w-24 px-2.5 py-1 rounded-xl border border-amber-400 text-sm font-bold text-stone-900 tabular-nums focus:outline-none"
+                className="w-24 px-2.5 py-1 rounded-xl border border-amber-400 text-sm font-semibold text-stone-900 tabular-nums focus:outline-none"
                 autoFocus
               />
               <button
                 type="button"
                 onClick={handleSaveBudgetLimit}
-                className="px-2.5 py-1 rounded-xl bg-stone-900 text-amber-300 text-xs font-bold"
+                className="px-3 py-1 rounded-xl bg-stone-900 text-white text-xs font-semibold"
               >
                 บันทึก
               </button>
               <button
                 type="button"
+                aria-label="ปิดการแก้งบ"
                 onClick={() => setEditingBudget(false)}
-                className="p-1 rounded-xl text-stone-400 hover:text-stone-700"
+                className="p-1 rounded-lg text-stone-400 hover:text-stone-700"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -481,22 +543,33 @@ export function BudgetTab({
           )}
         </div>
 
-        {/* Budget Used vs Remaining Progress */}
-        <div className="rounded-2xl bg-[#FAF7F0] border border-[#EFE6D6] p-3.5 space-y-2.5">
+        {/* Part A: Budget Usage */}
+        <div className="space-y-2">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="text-xs font-bold text-stone-600">
-              งบที่ใช้ไปจริง vs งบคงเหลือ
-            </span>
-            <span
-              className={`text-xs font-extrabold tabular-nums ${
-                isOverBudget ? "text-rose-600" : "text-stone-700"
-              }`}
-            >
-              ใช้แล้ว ฿{formatBaht(totalExpenses)} / ฿{formatBaht(budgetLimit)}
-            </span>
+            <div>
+              <div className="text-xs text-stone-500">ใช้ไปแล้วจริง</div>
+              <div className="text-xl font-bold text-stone-900 tabular-nums">
+                ฿{formatBaht(totalExpenses)}
+                <span className="text-xs font-normal text-stone-400 ml-1">
+                  / ฿{formatBaht(budgetLimit)}
+                </span>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-stone-500">
+                {isOverBudget ? "เกินงบไป" : "งบคงเหลือ"}
+              </div>
+              <div
+                className={`text-xl font-bold tabular-nums ${
+                  isOverBudget ? "text-rose-600" : "text-emerald-700"
+                }`}
+              >
+                ฿{formatBaht(Math.abs(budgetRemaining))}
+              </div>
+            </div>
           </div>
 
-          <div className="w-full h-3.5 rounded-full bg-stone-200 overflow-hidden">
+          <div className="w-full h-2.5 rounded-full bg-stone-100 overflow-hidden">
             <div
               className={`h-full rounded-full transition-all duration-300 ${
                 isOverBudget
@@ -508,41 +581,45 @@ export function BudgetTab({
               style={{ width: `${budgetUsagePct}%` }}
             />
           </div>
-
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-stone-500">
-              ใช้ไป {budgetUsagePct}% ของงบตั้งต้น
-            </span>
-            {isOverBudget ? (
-              <span className="font-extrabold text-rose-600 tabular-nums">
-                เกินงบ ฿{formatBaht(Math.abs(budgetRemaining))}
-              </span>
-            ) : (
-              <span className="font-extrabold text-emerald-700 tabular-nums">
-                งบคงเหลือ ฿{formatBaht(budgetRemaining)}
-              </span>
-            )}
+          <div className="text-[11px] text-stone-400 tabular-nums">
+            ใช้งบไปแล้ว {budgetUsagePct}%
           </div>
         </div>
 
-        {/* Break-even Meter */}
-        <div
-          className={`rounded-2xl border p-3.5 space-y-2.5 ${
-            isBreakEven
-              ? "bg-emerald-50/70 border-emerald-200"
-              : "bg-amber-50/70 border-amber-200"
-          }`}
-        >
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-bold text-stone-700">
-              จุดคุ้มทุน (รายรับทั้งหมด ÷ รายจ่ายจริง)
-            </span>
-            <span className="text-xs font-extrabold tabular-nums text-stone-800">
+        <hr className="border-stone-100" />
+
+        {/* Part B: Break-even Progress */}
+        <div className="space-y-2.5">
+          <div className="flex items-baseline justify-between gap-2">
+            <div>
+              <div className="text-xs text-stone-500">สถานะจุดคุ้มทุน</div>
+              {isBreakEven ? (
+                <div className="text-lg font-bold text-emerald-700 flex items-center gap-1.5 mt-0.5">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>กำไรสุทธิ +฿{formatBaht(netProfit)}</span>
+                </div>
+              ) : (
+                <div className="text-lg font-bold text-stone-900 mt-0.5 tabular-nums">
+                  ขาดอีก{" "}
+                  <span className="text-amber-700">
+                    ฿{formatBaht(Math.abs(netProfit))}
+                  </span>{" "}
+                  จะคืนทุน
+                </div>
+              )}
+            </div>
+            <span
+              className={`px-2.5 py-0.5 rounded-full text-xs font-semibold tabular-nums ${
+                isBreakEven
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-amber-50 text-amber-800"
+              }`}
+            >
               {breakEvenPct}%
             </span>
           </div>
 
-          <div className="w-full h-3.5 rounded-full bg-white/90 border border-black/5 overflow-hidden">
+          <div className="w-full h-2.5 rounded-full bg-stone-100 overflow-hidden">
             <div
               className={`h-full rounded-full transition-all duration-300 ${
                 isBreakEven ? "bg-emerald-500" : "bg-amber-500"
@@ -551,46 +628,19 @@ export function BudgetTab({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-2 text-xs pt-0.5">
-            <div>
-              <div className="text-stone-500">รายรับรวม (ไม่รวม void)</div>
-              <div className="text-base font-extrabold text-stone-900 tabular-nums">
+          <div className="flex items-center justify-between text-xs text-stone-500 pt-0.5 tabular-nums">
+            <span>
+              รายรับรวม (ไม่รวม void):{" "}
+              <strong className="text-stone-800 font-semibold">
                 ฿{formatBaht(totalRevenueAll)}
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-stone-500">รายจ่ายที่จ่ายจริง</div>
-              <div className="text-base font-extrabold text-stone-900 tabular-nums">
+              </strong>
+            </span>
+            <span>
+              รายจ่ายจริง:{" "}
+              <strong className="text-stone-800 font-semibold">
                 ฿{formatBaht(totalExpenses)}
-              </div>
-            </div>
-          </div>
-
-          <div
-            className={`pt-2 border-t text-sm font-extrabold flex items-center justify-between ${
-              isBreakEven
-                ? "border-emerald-200 text-emerald-800"
-                : "border-amber-200 text-amber-900"
-            }`}
-          >
-            {isBreakEven ? (
-              <>
-                <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  คืนทุนแล้ว! กำไรสุทธิ
-                </span>
-                <span className="text-lg tabular-nums text-emerald-700">
-                  +฿{formatBaht(netProfit)}
-                </span>
-              </>
-            ) : (
-              <>
-                <span>ขาดอีกเท่าไหร่จะคืนทุน</span>
-                <span className="text-lg tabular-nums text-rose-600">
-                  อีก ฿{formatBaht(Math.abs(netProfit))}
-                </span>
-              </>
-            )}
+              </strong>
+            </span>
           </div>
         </div>
       </section>
@@ -600,38 +650,33 @@ export function BudgetTab({
       {/* =================================================================== */}
       <section
         aria-label="สรุปยอดขายปิดวัน"
-        className="rounded-3xl bg-white border border-[#E9DFCE] shadow-xs p-4 sm:p-5 space-y-4"
+        className="rounded-3xl bg-white border border-stone-200/80 shadow-[0_2px_14px_-4px_rgba(28,25,23,0.06)] p-5 space-y-4"
       >
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2">
           <div>
-            <h2 className="text-base font-extrabold text-stone-900">
+            <h2 className="text-base font-semibold text-stone-900">
               สรุปยอดขายปิดวัน
             </h2>
-            <p className="text-xs text-stone-500">
-              ช่วงข้อมูล:{" "}
-              <span className="font-semibold text-stone-700">
-                {filterDisplayLabel}
-              </span>
-            </p>
+            <p className="text-xs text-stone-400 mt-0.5">{filterDisplayLabel}</p>
           </div>
 
           <button
             type="button"
             onClick={handleCopySummary}
-            className={`min-h-[40px] px-3.5 py-2 rounded-2xl text-xs font-extrabold transition-all active:scale-95 flex items-center gap-1.5 ${
+            className={`min-h-[38px] px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95 inline-flex items-center gap-1.5 ${
               copiedSummary
                 ? "bg-emerald-600 text-white"
-                : "bg-stone-900 hover:bg-stone-800 text-amber-300"
+                : "bg-stone-900 hover:bg-stone-800 text-white"
             }`}
           >
             {copiedSummary ? (
               <>
-                <ClipboardCheck className="w-4 h-4" />
-                คัดลอกแล้ว!
+                <ClipboardCheck className="w-3.5 h-3.5" />
+                คัดลอกแล้ว
               </>
             ) : (
               <>
-                <ClipboardCopy className="w-4 h-4" />
+                <ClipboardCopy className="w-3.5 h-3.5" />
                 คัดลอกสรุปยอด
               </>
             )}
@@ -639,14 +684,14 @@ export function BudgetTab({
         </div>
 
         {/* Date Filter Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
           <button
             type="button"
             onClick={() => setSalesFilter("today")}
-            className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold border transition-colors ${
+            className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors ${
               salesFilter === "today"
-                ? "bg-amber-500 border-amber-600 text-white"
-                : "bg-stone-100 border-stone-200 text-stone-700"
+                ? "bg-stone-900 text-white"
+                : "bg-stone-100 text-stone-600 hover:bg-stone-200/70"
             }`}
           >
             วันนี้
@@ -659,10 +704,10 @@ export function BudgetTab({
                 key={dk}
                 type="button"
                 onClick={() => setSalesFilter(dk)}
-                className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold border transition-colors ${
+                className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors ${
                   salesFilter === dk
-                    ? "bg-amber-500 border-amber-600 text-white"
-                    : "bg-stone-100 border-stone-200 text-stone-700"
+                    ? "bg-stone-900 text-white"
+                    : "bg-stone-100 text-stone-600 hover:bg-stone-200/70"
                 }`}
               >
                 {formatThaiDateLabel(dk)}
@@ -672,92 +717,88 @@ export function BudgetTab({
           <button
             type="button"
             onClick={() => setSalesFilter("all")}
-            className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold border transition-colors ${
+            className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors ${
               salesFilter === "all"
-                ? "bg-amber-500 border-amber-600 text-white"
-                : "bg-stone-100 border-stone-200 text-stone-700"
+                ? "bg-stone-900 text-white"
+                : "bg-stone-100 text-stone-600 hover:bg-stone-200/70"
             }`}
           >
             รวมทั้งหมด
           </button>
         </div>
 
-        {/* MAKE Transfer (Big Highlight) + Cash */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* MAKE Transfer + Cash Reconcile */}
+        <div className="grid grid-cols-2 gap-3">
           {/* MAKE Card */}
-          <div className="rounded-2xl bg-teal-50 border-2 border-teal-300 p-4 space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-teal-800">
-                <Wallet className="w-4 h-4" />
-                ยอดโอน (MAKE)
+          <div className="rounded-2xl bg-teal-50/75 border border-teal-200/70 p-3.5 space-y-1">
+            <div className="flex items-center justify-between gap-1">
+              <span className="inline-flex items-center gap-1 text-xs font-semibold text-teal-800">
+                <Wallet className="w-3.5 h-3.5" />
+                โอน (MAKE)
               </span>
-              <span className="px-2 py-0.5 rounded-full bg-teal-600 text-white text-[11px] font-bold tabular-nums">
+              <span className="text-[11px] font-medium text-teal-700 tabular-nums">
                 {salesStats.makeCount} บิล
               </span>
             </div>
-            <div className="text-3xl sm:text-4xl font-extrabold text-teal-900 tabular-nums tracking-tight">
+            <div className="text-2xl sm:text-3xl font-bold text-teal-950 tabular-nums tracking-tight pt-0.5">
               ฿{formatBaht(salesStats.makeTotal)}
             </div>
-            <p className="text-[11px] text-teal-700 font-medium">
-              เทียบกับยอดใน MAKE Cloud Pocket
+            <p className="text-[11px] text-teal-700/80">
+              เทียบ MAKE Cloud Pocket
             </p>
           </div>
 
           {/* Cash Card */}
-          <div className="rounded-2xl bg-orange-50 border border-orange-200 p-4 space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-orange-800">
-                <Banknote className="w-4 h-4" />
-                ยอดเงินสด
+          <div className="rounded-2xl bg-stone-50 border border-stone-200/80 p-3.5 space-y-1">
+            <div className="flex items-center justify-between gap-1">
+              <span className="inline-flex items-center gap-1 text-xs font-semibold text-stone-700">
+                <Banknote className="w-3.5 h-3.5 text-amber-700" />
+                เงินสด
               </span>
-              <span className="px-2 py-0.5 rounded-full bg-orange-600 text-white text-[11px] font-bold tabular-nums">
+              <span className="text-[11px] font-medium text-stone-500 tabular-nums">
                 {salesStats.cashCount} บิล
               </span>
             </div>
-            <div className="text-3xl sm:text-4xl font-extrabold text-orange-900 tabular-nums tracking-tight">
+            <div className="text-2xl sm:text-3xl font-bold text-stone-900 tabular-nums tracking-tight pt-0.5">
               ฿{formatBaht(salesStats.cashTotal)}
             </div>
-            <p className="text-[11px] text-orange-700 font-medium">
-              เงินสดในกล่องทอน (ไม่รวมเงินทอนตั้งต้น)
-            </p>
+            <p className="text-[11px] text-stone-500">ไม่รวมเงินทอนตั้งต้น</p>
           </div>
         </div>
 
-        {/* Total Revenue, Total Cups & Toppings Breakdown */}
-        <div className="rounded-2xl bg-[#FAF7F0] border border-[#EFE6D6] p-3.5 space-y-3">
-          <div className="flex items-center justify-between pb-2.5 border-b border-[#E9DFCE]">
+        {/* Clean Total & Cups Breakdown */}
+        <div className="pt-1 space-y-3">
+          <div className="flex items-center justify-between py-2.5 border-y border-stone-100">
             <div>
               <div className="text-xs text-stone-500">
                 ยอดขายรวม ({salesStats.totalBills} บิล)
               </div>
-              <div className="text-xl font-extrabold text-stone-900 tabular-nums">
+              <div className="text-lg font-bold text-stone-900 tabular-nums">
                 ฿{formatBaht(salesStats.totalRevenue)}
               </div>
             </div>
             <div className="text-right">
               <div className="text-xs text-stone-500">ขายได้ทั้งหมด</div>
-              <div className="text-xl font-extrabold text-amber-700 tabular-nums">
+              <div className="text-lg font-bold text-amber-700 tabular-nums">
                 {salesStats.totalCups} แก้ว
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div className="grid grid-cols-2 gap-4 text-xs">
             <div className="space-y-1.5">
-              <div className="font-bold text-stone-600">จำนวนเมนูที่ขายได้</div>
+              <div className="font-medium text-stone-400">แยกตามเมนู</div>
               {salesStats.menuEntries.length === 0 ? (
-                <div className="text-stone-400">ยังไม่มีรายการขาย</div>
+                <div className="text-stone-400">—</div>
               ) : (
                 <ul className="space-y-1">
                   {salesStats.menuEntries.map(([name, qty]) => (
                     <li
                       key={name}
-                      className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-xl border border-[#EFE6D6]"
+                      className="flex items-center justify-between gap-2"
                     >
-                      <span className="font-semibold text-stone-800">
-                        {name}
-                      </span>
-                      <span className="font-extrabold text-stone-900 tabular-nums">
+                      <span className="text-stone-700 truncate">{name}</span>
+                      <span className="font-semibold text-stone-900 tabular-nums shrink-0">
                         {qty} แก้ว
                       </span>
                     </li>
@@ -767,22 +808,18 @@ export function BudgetTab({
             </div>
 
             <div className="space-y-1.5">
-              <div className="font-bold text-stone-600">
-                จำนวนท็อปปิ้งที่ออกไป
-              </div>
+              <div className="font-medium text-stone-400">ท็อปปิ้งที่ออก</div>
               {salesStats.toppingEntries.length === 0 ? (
-                <div className="text-stone-400">ยังไม่มีท็อปปิ้ง</div>
+                <div className="text-stone-400">—</div>
               ) : (
                 <ul className="space-y-1">
                   {salesStats.toppingEntries.map(([name, qty]) => (
                     <li
                       key={name}
-                      className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-xl border border-[#EFE6D6]"
+                      className="flex items-center justify-between gap-2"
                     >
-                      <span className="font-semibold text-stone-800">
-                        +{name}
-                      </span>
-                      <span className="font-extrabold text-amber-800 tabular-nums">
+                      <span className="text-stone-700 truncate">+{name}</span>
+                      <span className="font-semibold text-stone-900 tabular-nums shrink-0">
                         {qty} ที่
                       </span>
                     </li>
@@ -799,47 +836,41 @@ export function BudgetTab({
       {/* =================================================================== */}
       <section
         aria-label="จดรายจ่ายเพิ่มเติม"
-        className="rounded-3xl bg-white border border-[#E9DFCE] shadow-xs p-4 sm:p-5 space-y-4"
+        className="rounded-3xl bg-white border border-stone-200/80 shadow-[0_2px_14px_-4px_rgba(28,25,23,0.06)] p-5 space-y-4"
       >
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="w-8 h-8 rounded-xl bg-stone-100 text-stone-700 flex items-center justify-center">
-              <Receipt className="w-4 h-4" />
-            </span>
-            <h2 className="text-base font-extrabold text-stone-900">
-              บันทึกรายจ่าย
-            </h2>
-          </div>
-          <span className="text-sm font-extrabold text-stone-900 tabular-nums">
+          <h2 className="text-base font-semibold text-stone-900">
+            บันทึกรายจ่าย
+          </h2>
+          <span className="text-sm font-bold text-stone-900 tabular-nums">
             รวม ฿{formatBaht(totalExpenses)}
           </span>
         </div>
 
         {/* Add Expense Form */}
-        <form
-          onSubmit={handleSubmitExpense}
-          className="grid grid-cols-1 sm:grid-cols-[1fr_120px_auto] gap-2"
-        >
-          <input
-            type="text"
-            value={expenseTitle}
-            onChange={(e) => setExpenseTitle(e.target.value)}
-            placeholder="ชื่อรายการ (เช่น น้ำแข็ง, ถ้วยเพิ่ม)..."
-            className="min-h-[44px] px-3.5 py-2 rounded-xl bg-stone-50 border border-stone-200 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:bg-white"
-          />
-          <input
-            type="number"
-            inputMode="numeric"
-            min={1}
-            value={expenseAmount}
-            onChange={(e) => setExpenseAmount(e.target.value)}
-            placeholder="บาท"
-            className="min-h-[44px] px-3.5 py-2 rounded-xl bg-stone-50 border border-stone-200 text-sm font-bold text-stone-900 tabular-nums placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:bg-white"
-          />
+        <form onSubmit={handleSubmitExpense} className="space-y-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={expenseTitle}
+              onChange={(e) => setExpenseTitle(e.target.value)}
+              placeholder="รายการที่ซื้อเพิ่ม (เช่น น้ำแข็ง, ถ้วย)..."
+              className="flex-1 min-w-0 min-h-[44px] px-3.5 py-2 rounded-xl bg-stone-50 border border-stone-200/80 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:border-amber-400 focus:bg-white"
+            />
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              value={expenseAmount}
+              onChange={(e) => setExpenseAmount(e.target.value)}
+              placeholder="บาท"
+              className="w-24 shrink-0 min-h-[44px] px-3 py-2 rounded-xl bg-stone-50 border border-stone-200/80 text-sm font-semibold text-stone-900 tabular-nums text-right placeholder:text-stone-400 focus:outline-none focus:border-amber-400 focus:bg-white"
+            />
+          </div>
           <button
             type="submit"
             disabled={!expenseTitle.trim() || !expenseAmount}
-            className="min-h-[44px] px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 disabled:opacity-40 text-amber-300 font-bold text-sm flex items-center justify-center gap-1.5 active:scale-95"
+            className="w-full min-h-[42px] px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 disabled:bg-stone-200 disabled:text-stone-400 text-white font-semibold text-sm flex items-center justify-center gap-1.5 transition-colors active:scale-[0.99]"
           >
             <Plus className="w-4 h-4" />
             เพิ่มรายจ่าย
@@ -848,22 +879,22 @@ export function BudgetTab({
 
         {/* Expense List */}
         {expenses.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-stone-200 p-4 text-center text-xs text-stone-400">
+          <div className="py-5 text-center text-xs text-stone-400 border-t border-stone-100">
             ยังไม่มีรายการรายจ่าย
           </div>
         ) : (
-          <ul className="divide-y divide-[#EFE6D6] rounded-2xl border border-[#EFE6D6] overflow-hidden">
+          <ul className="divide-y divide-stone-100 border-t border-stone-100">
             {expenses.map((expense) => {
               const isEditing = editingExpenseId === expense.id;
               return (
-                <li key={expense.id} className="p-3 bg-white">
+                <li key={expense.id} className="py-3 first:pt-3 last:pb-0">
                   {isEditing ? (
-                    <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="space-y-2">
                       <input
                         type="text"
                         value={editExpenseTitle}
                         onChange={(e) => setEditExpenseTitle(e.target.value)}
-                        className="flex-1 min-h-[38px] px-3 py-1.5 rounded-xl border border-amber-400 text-sm font-semibold text-stone-900"
+                        className="w-full min-h-[40px] px-3 py-1.5 rounded-xl border border-amber-400 text-sm font-medium text-stone-900 focus:outline-none"
                       />
                       <div className="flex items-center gap-2">
                         <input
@@ -871,12 +902,12 @@ export function BudgetTab({
                           inputMode="numeric"
                           value={editExpenseAmount}
                           onChange={(e) => setEditExpenseAmount(e.target.value)}
-                          className="w-24 min-h-[38px] px-3 py-1.5 rounded-xl border border-amber-400 text-sm font-bold text-stone-900 tabular-nums"
+                          className="w-28 min-h-[38px] px-3 py-1.5 rounded-xl border border-amber-400 text-sm font-semibold text-stone-900 tabular-nums focus:outline-none"
                         />
                         <button
                           type="button"
                           onClick={saveEditExpense}
-                          className="min-h-[38px] px-3 rounded-xl bg-emerald-600 text-white text-xs font-bold flex items-center gap-1"
+                          className="min-h-[38px] px-3.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold inline-flex items-center gap-1"
                         >
                           <Check className="w-3.5 h-3.5" />
                           บันทึก
@@ -884,32 +915,32 @@ export function BudgetTab({
                         <button
                           type="button"
                           onClick={() => setEditingExpenseId(null)}
-                          className="min-h-[38px] px-2.5 rounded-xl bg-stone-100 text-stone-600 text-xs font-bold"
+                          className="min-h-[38px] px-3 rounded-xl bg-stone-100 text-stone-600 text-xs font-medium"
                         >
                           ยกเลิก
                         </button>
                       </div>
                     </div>
                   ) : (
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-sm font-bold text-stone-900 truncate">
+                        <div className="text-sm font-medium text-stone-900 leading-snug">
                           {expense.title}
                         </div>
-                        <div className="text-[11px] text-stone-400">
+                        <div className="text-[11px] text-stone-400 mt-0.5">
                           {formatThaiDateLabel(expense.dateKey)}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="text-sm font-extrabold text-stone-900 tabular-nums mr-1">
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-sm font-bold text-stone-900 tabular-nums mr-1.5">
                           ฿{formatBaht(expense.amount)}
                         </span>
                         <button
                           type="button"
                           aria-label={`แก้ไข ${expense.title}`}
                           onClick={() => startEditExpense(expense)}
-                          className="w-8 h-8 rounded-xl bg-stone-100 hover:bg-amber-100 text-stone-600 flex items-center justify-center"
+                          className="w-8 h-8 rounded-xl text-stone-400 hover:bg-stone-100 hover:text-stone-700 flex items-center justify-center"
                         >
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
@@ -917,7 +948,7 @@ export function BudgetTab({
                           type="button"
                           aria-label={`ลบ ${expense.title}`}
                           onClick={() => onDeleteExpense(expense.id)}
-                          className="w-8 h-8 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 flex items-center justify-center"
+                          className="w-8 h-8 rounded-xl text-stone-400 hover:bg-rose-50 hover:text-rose-600 flex items-center justify-center"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -932,47 +963,44 @@ export function BudgetTab({
       </section>
 
       {/* =================================================================== */}
-      {/* 4. BOTTOM TOOLS: MENU/PRICE SETTINGS, BACKUP, CLEAR TEST BILLS      */}
+      {/* 4A. MENU & TOPPING PRICE SETTINGS (CLEAN COLLAPSIBLE)               */}
       {/* =================================================================== */}
       <section
-        aria-label="ตั้งค่าเมนูและสำรองข้อมูล"
-        className="rounded-2xl bg-white border border-[#E9DFCE] overflow-hidden"
+        aria-label="ตั้งค่าเมนูและราคา"
+        className="rounded-2xl bg-white border border-stone-200/80 overflow-hidden"
       >
         <button
           type="button"
-          onClick={() => setToolsOpen((prev) => !prev)}
-          aria-expanded={toolsOpen}
-          className="w-full min-h-[48px] px-4 py-3 flex items-center justify-between text-left hover:bg-[#FAF5EB]/60"
+          onClick={() => setMenuEditorOpen((prev) => !prev)}
+          aria-expanded={menuEditorOpen}
+          className="w-full min-h-[50px] px-4 py-3 flex items-center justify-between text-left hover:bg-stone-50/70 transition-colors"
         >
-          <span className="flex items-center gap-2 text-sm font-bold text-stone-700">
-            <Settings2 className="w-4 h-4 text-amber-700" />
-            ตั้งค่าเมนู / สำรองข้อมูล / ล้างบิลทดสอบ
+          <span className="flex items-center gap-2 text-sm font-medium text-stone-700">
+            <Settings2 className="w-4 h-4 text-stone-400" />
+            แก้ไขราคา / เพิ่มเมนู &amp; ท็อปปิ้ง
           </span>
-          <span className="text-xs font-semibold text-stone-400">
-            {toolsOpen ? "ซ่อน" : "เปิด"}
-          </span>
+          {menuEditorOpen ? (
+            <ChevronUp className="w-4 h-4 text-stone-400" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-stone-400" />
+          )}
         </button>
 
-        {toolsOpen && (
-          <div className="border-t border-[#EFE6D6] p-4 space-y-5">
-            {/* Edit / Add Menus */}
+        {menuEditorOpen && (
+          <div className="border-t border-stone-100 p-4 space-y-5">
+            {/* Menus */}
             <div className="space-y-2.5">
-              <h3 className="text-xs font-extrabold uppercase tracking-wide text-stone-500">
-                จัดการเมนูหลัก &amp; ราคา
-              </h3>
+              <h3 className="text-xs font-semibold text-stone-500">เมนูหลัก</h3>
               <div className="space-y-2">
                 {settings.menus.map((menu) => (
-                  <div
-                    key={menu.id}
-                    className="flex items-center gap-2 bg-[#FAF7F0] p-2 rounded-xl border border-[#EFE6D6]"
-                  >
+                  <div key={menu.id} className="flex items-center gap-2">
                     <input
                       type="text"
                       value={menu.name}
                       onChange={(e) =>
                         handleUpdateMenuName(menu.id, e.target.value)
                       }
-                      className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg bg-white border border-stone-200 text-sm font-bold text-stone-900"
+                      className="flex-1 min-w-0 min-h-[38px] px-3 py-1.5 rounded-xl bg-stone-50 border border-stone-200/80 text-sm font-medium text-stone-900"
                     />
                     <input
                       type="number"
@@ -981,32 +1009,32 @@ export function BudgetTab({
                       onChange={(e) =>
                         handleUpdateMenuPrice(menu.id, e.target.value)
                       }
-                      className="w-20 px-2.5 py-1.5 rounded-lg bg-white border border-stone-200 text-sm font-bold text-stone-900 tabular-nums text-right"
+                      className="w-20 min-h-[38px] px-2.5 py-1.5 rounded-xl bg-stone-50 border border-stone-200/80 text-sm font-semibold text-stone-900 tabular-nums text-right"
                     />
                     <button
                       type="button"
                       onClick={() => handleToggleMenuActive(menu.id)}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold shrink-0 ${
+                      className={`min-h-[38px] px-2.5 py-1.5 rounded-xl text-xs font-medium shrink-0 ${
                         menu.active
-                          ? "bg-emerald-100 text-emerald-800"
-                          : "bg-stone-200 text-stone-500"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-stone-100 text-stone-500"
                       }`}
                     >
-                      {menu.active ? "เปิดขาย" : "ซ่อน"}
+                      {menu.active ? "เปิด" : "ซ่อน"}
                     </button>
                   </div>
                 ))}
               </div>
               <form
                 onSubmit={handleAddNewMenu}
-                className="flex items-center gap-2"
+                className="flex items-center gap-2 pt-1"
               >
                 <input
                   type="text"
                   value={newMenuName}
                   onChange={(e) => setNewMenuName(e.target.value)}
                   placeholder="เพิ่มเมนูใหม่..."
-                  className="flex-1 min-w-0 min-h-[38px] px-3 py-1.5 rounded-xl bg-stone-50 border border-stone-200 text-xs"
+                  className="flex-1 min-w-0 min-h-[38px] px-3 py-1.5 rounded-xl bg-white border border-stone-200 text-xs"
                 />
                 <input
                   type="number"
@@ -1014,35 +1042,30 @@ export function BudgetTab({
                   value={newMenuPrice}
                   onChange={(e) => setNewMenuPrice(e.target.value)}
                   placeholder="ราคา"
-                  className="w-20 min-h-[38px] px-3 py-1.5 rounded-xl bg-stone-50 border border-stone-200 text-xs font-bold tabular-nums"
+                  className="w-20 min-h-[38px] px-2.5 py-1.5 rounded-xl bg-white border border-stone-200 text-xs font-semibold tabular-nums text-right"
                 />
                 <button
                   type="submit"
-                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-amber-500 text-white text-xs font-bold shrink-0"
+                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-stone-900 text-white text-xs font-semibold shrink-0"
                 >
                   + เพิ่ม
                 </button>
               </form>
             </div>
 
-            {/* Edit / Add Toppings */}
-            <div className="space-y-2.5">
-              <h3 className="text-xs font-extrabold uppercase tracking-wide text-stone-500">
-                จัดการท็อปปิ้ง &amp; ราคา
-              </h3>
+            {/* Toppings */}
+            <div className="space-y-2.5 pt-3 border-t border-stone-100">
+              <h3 className="text-xs font-semibold text-stone-500">ท็อปปิ้ง</h3>
               <div className="space-y-2">
                 {settings.toppings.map((topping) => (
-                  <div
-                    key={topping.id}
-                    className="flex items-center gap-2 bg-[#FAF7F0] p-2 rounded-xl border border-[#EFE6D6]"
-                  >
+                  <div key={topping.id} className="flex items-center gap-2">
                     <input
                       type="text"
                       value={topping.name}
                       onChange={(e) =>
                         handleUpdateToppingName(topping.id, e.target.value)
                       }
-                      className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg bg-white border border-stone-200 text-sm font-bold text-stone-900"
+                      className="flex-1 min-w-0 min-h-[38px] px-3 py-1.5 rounded-xl bg-stone-50 border border-stone-200/80 text-sm font-medium text-stone-900"
                     />
                     <input
                       type="number"
@@ -1051,32 +1074,32 @@ export function BudgetTab({
                       onChange={(e) =>
                         handleUpdateToppingPrice(topping.id, e.target.value)
                       }
-                      className="w-20 px-2.5 py-1.5 rounded-lg bg-white border border-stone-200 text-sm font-bold text-stone-900 tabular-nums text-right"
+                      className="w-20 min-h-[38px] px-2.5 py-1.5 rounded-xl bg-stone-50 border border-stone-200/80 text-sm font-semibold text-stone-900 tabular-nums text-right"
                     />
                     <button
                       type="button"
                       onClick={() => handleToggleToppingActive(topping.id)}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold shrink-0 ${
+                      className={`min-h-[38px] px-2.5 py-1.5 rounded-xl text-xs font-medium shrink-0 ${
                         topping.active
-                          ? "bg-emerald-100 text-emerald-800"
-                          : "bg-stone-200 text-stone-500"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-stone-100 text-stone-500"
                       }`}
                     >
-                      {topping.active ? "เปิดขาย" : "ซ่อน"}
+                      {topping.active ? "เปิด" : "ซ่อน"}
                     </button>
                   </div>
                 ))}
               </div>
               <form
                 onSubmit={handleAddNewTopping}
-                className="flex items-center gap-2"
+                className="flex items-center gap-2 pt-1"
               >
                 <input
                   type="text"
                   value={newToppingName}
                   onChange={(e) => setNewToppingName(e.target.value)}
                   placeholder="เพิ่มท็อปปิ้งใหม่..."
-                  className="flex-1 min-w-0 min-h-[38px] px-3 py-1.5 rounded-xl bg-stone-50 border border-stone-200 text-xs"
+                  className="flex-1 min-w-0 min-h-[38px] px-3 py-1.5 rounded-xl bg-white border border-stone-200 text-xs"
                 />
                 <input
                   type="number"
@@ -1084,133 +1107,96 @@ export function BudgetTab({
                   value={newToppingPrice}
                   onChange={(e) => setNewToppingPrice(e.target.value)}
                   placeholder="ราคา"
-                  className="w-20 min-h-[38px] px-3 py-1.5 rounded-xl bg-stone-50 border border-stone-200 text-xs font-bold tabular-nums"
+                  className="w-20 min-h-[38px] px-2.5 py-1.5 rounded-xl bg-white border border-stone-200 text-xs font-semibold tabular-nums text-right"
                 />
                 <button
                   type="submit"
-                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-amber-500 text-white text-xs font-bold shrink-0"
+                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-stone-900 text-white text-xs font-semibold shrink-0"
                 >
                   + เพิ่ม
                 </button>
               </form>
-            </div>
-
-            {/* JSON Backup */}
-            <div className="space-y-2 pt-2 border-t border-[#EFE6D6]">
-              <h3 className="text-xs font-extrabold uppercase tracking-wide text-stone-500">
-                สำรองข้อมูล (JSON)
-              </h3>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={onExportJson}
-                  className="min-h-[42px] px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold flex items-center justify-center gap-1.5"
-                >
-                  <Download className="w-4 h-4" />
-                  Export JSON
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="min-h-[42px] px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold flex items-center justify-center gap-1.5"
-                >
-                  <Upload className="w-4 h-4" />
-                  Import JSON
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="application/json,.json"
-                  onChange={handleFileImport}
-                  className="hidden"
-                />
-              </div>
-
-              {backupMessage && (
-                <div
-                  className={`text-xs font-bold px-3 py-2 rounded-xl ${
-                    backupMessage.type === "ok"
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "bg-rose-50 text-rose-700"
-                  }`}
-                >
-                  {backupMessage.text}
-                </div>
-              )}
-            </div>
-
-            {/* Clear Test Bills Only */}
-            <div className="pt-2 border-t border-[#EFE6D6]">
-              <button
-                type="button"
-                onClick={() => setConfirmClearOpen(true)}
-                className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-xs font-extrabold flex items-center justify-center gap-2"
-              >
-                <Trash2 className="w-4 h-4" />
-                ล้างเฉพาะบิลทดสอบ (คงรายจ่าย 1,500 บาทไว้)
-              </button>
             </div>
           </div>
         )}
       </section>
 
       {/* =================================================================== */}
-      {/* CONFIRMATION MODAL: CLEAR TEST BILLS ONLY                           */}
+      {/* 4B. BACKUP & CLEAR TEST BILLS (ALWAYS DIRECTLY ACCESSIBLE)          */}
       {/* =================================================================== */}
-      {confirmClearOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="clear-orders-title"
-          className="fixed inset-0 z-50 bg-black/45 backdrop-blur-xs flex items-center justify-center p-4"
-        >
-          <div className="w-full max-w-sm rounded-3xl bg-white border border-[#E9DFCE] shadow-xl p-5 space-y-4">
-            <div className="flex items-start gap-3">
-              <span className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5" />
-              </span>
-              <div className="space-y-1">
-                <h3
-                  id="clear-orders-title"
-                  className="text-base font-extrabold text-stone-900"
-                >
-                  ยืนยันล้างเฉพาะบิลทดสอบ?
-                </h3>
-                <p className="text-xs text-stone-600 leading-relaxed">
-                  ระบบจะลบออเดอร์ทั้งหมด ({orders.length} บิล) และรีเซ็ตคิวกลับเป็น{" "}
-                  <strong>#01</strong> แต่จะ
-                  <strong className="text-emerald-700">
-                    ไม่ลบรายการรายจ่าย ({expenses.length} รายการ รวม ฿
-                    {formatBaht(totalExpenses)})
-                  </strong>{" "}
-                  และการตั้งค่าเมนูของคุณ
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={() => setConfirmClearOpen(false)}
-                className="min-h-[44px] rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-800 text-sm font-bold"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onClearOrdersOnly();
-                  setConfirmClearOpen(false);
-                }}
-                className="min-h-[44px] rounded-2xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-extrabold"
-              >
-                ยืนยันล้างบิล
-              </button>
-            </div>
-          </div>
+      <section
+        aria-label="สำรองข้อมูลและล้างบิลทดสอบ"
+        className="rounded-2xl bg-white border border-stone-200/80 p-4 space-y-3"
+      >
+        <div className="text-xs font-semibold text-stone-500">
+          สำรองข้อมูล &amp; เคลียร์ก่อนเปิดร้าน
         </div>
-      )}
+
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={onExportJson}
+            className="min-h-[42px] px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200/70 text-stone-700 text-xs font-semibold flex items-center justify-center gap-1.5 active:scale-[0.98]"
+          >
+            <Download className="w-4 h-4 text-stone-500" />
+            Export JSON
+          </button>
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="min-h-[42px] px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200/70 text-stone-700 text-xs font-semibold flex items-center justify-center gap-1.5 active:scale-[0.98]"
+          >
+            <Upload className="w-4 h-4 text-stone-500" />
+            Import JSON
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            onChange={handleFileImport}
+            className="hidden"
+          />
+        </div>
+
+        <div className="pt-2 border-t border-stone-100">
+          <button
+            type="button"
+            onClick={() => {
+              if (orders.length === 0) {
+                onNotify("ยังไม่มีบิลให้ล้าง (คิวพร้อมเริ่มที่ #01)");
+                return;
+              }
+              setConfirmClearOpen(true);
+            }}
+            className={`w-full min-h-[46px] px-4 py-2.5 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 transition-colors active:scale-[0.99] ${
+              orders.length > 0
+                ? "bg-rose-50/70 hover:bg-rose-100/80 border-rose-200 text-rose-700"
+                : "bg-stone-50 border-stone-200 text-stone-400"
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Trash2 className="w-4 h-4 shrink-0" />
+              <span>ล้างเฉพาะบิลทดสอบ</span>
+            </span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[11px] font-semibold tabular-nums ${
+                orders.length > 0
+                  ? "bg-rose-600 text-white"
+                  : "bg-stone-200 text-stone-500"
+              }`}
+            >
+              {orders.length} บิล
+            </span>
+          </button>
+          <p className="text-[11px] text-stone-400 mt-1.5 px-0.5">
+            ลบเฉพาะออเดอร์และรีเซ็ตคิวเป็น #01 โดยไม่ลบรายการรายจ่าย (฿
+            {formatBaht(totalExpenses)})
+          </p>
+        </div>
+      </section>
+
+      {confirmModal}
     </div>
   );
 }

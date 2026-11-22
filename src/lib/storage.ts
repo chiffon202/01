@@ -105,6 +105,7 @@ export interface BoothStorageAdapter {
   saveOrders: (orders: Order[]) => void;
   addOrder: (input: NewOrderInput) => { order: Order; orders: Order[] };
   updateOrderStatus: (orderId: string, status: OrderStatus) => Order[];
+  deleteOrder: (orderId: string) => Order[];
   clearOrdersOnly: () => Order[];
 
   getExpenses: () => Expense[];
@@ -247,11 +248,30 @@ export function createDefaultExpenses(): Expense[] {
 }
 
 // ----------------------------------------------------------------------------
+// Snapshot Cache (Referentially Stable for React useSyncExternalStore)
+// ----------------------------------------------------------------------------
+
+const SERVER_ORDERS_SNAPSHOT: Order[] = [];
+const SERVER_EXPENSES_SNAPSHOT: Expense[] = [];
+const SERVER_SETTINGS_SNAPSHOT: BoothSettings = createDefaultSettings();
+
+let cachedOrdersRaw: string | null = null;
+let cachedOrdersValue: Order[] = SERVER_ORDERS_SNAPSHOT;
+
+let cachedExpensesRaw: string | null = null;
+let cachedExpensesValue: Expense[] = SERVER_EXPENSES_SNAPSHOT;
+
+let cachedSettingsRaw: string | null = null;
+let cachedSettingsValue: BoothSettings = SERVER_SETTINGS_SNAPSHOT;
+
+// ----------------------------------------------------------------------------
 // Internal Helpers
 // ----------------------------------------------------------------------------
 
 function isBrowser(): boolean {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+  return (
+    typeof window !== "undefined" && typeof window.localStorage !== "undefined"
+  );
 }
 
 export function generateId(prefix = "id"): string {
@@ -306,7 +326,7 @@ export function getOrders(): Order[] {
   if (!isBrowser()) return [];
   const raw = window.localStorage.getItem(STORAGE_KEYS.ORDERS);
   if (raw === null) {
-    window.localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([]));
+    window.localStorage.setItem(STORAGE_KEYS.ORDERS, "[]");
     return [];
   }
   const parsed = safeParseJson<Order[]>(raw, []);
@@ -315,7 +335,10 @@ export function getOrders(): Order[] {
 
 export function saveOrders(orders: Order[]): void {
   if (!isBrowser()) return;
-  window.localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
+  const serialized = JSON.stringify(orders);
+  window.localStorage.setItem(STORAGE_KEYS.ORDERS, serialized);
+  cachedOrdersRaw = serialized;
+  cachedOrdersValue = orders;
   notifyStorageChange();
 }
 
@@ -397,6 +420,13 @@ export function updateOrderStatus(
   return nextOrders;
 }
 
+export function deleteOrder(orderId: string): Order[] {
+  const existing = getOrders();
+  const nextOrders = existing.filter((order) => order.id !== orderId);
+  saveOrders(nextOrders);
+  return nextOrders;
+}
+
 /**
  * Clears ONLY orders (e.g. test bills before opening day).
  * Expenses (such as the initial 1,500 THB material expense) and settings remain intact.
@@ -424,7 +454,10 @@ export function getExpenses(): Expense[] {
 
 export function saveExpenses(expenses: Expense[]): void {
   if (!isBrowser()) return;
-  window.localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(expenses));
+  const serialized = JSON.stringify(expenses);
+  window.localStorage.setItem(STORAGE_KEYS.EXPENSES, serialized);
+  cachedExpensesRaw = serialized;
+  cachedExpensesValue = expenses;
   notifyStorageChange();
 }
 
@@ -508,7 +541,10 @@ export function getSettings(): BoothSettings {
 
 export function saveSettings(settings: BoothSettings): void {
   if (!isBrowser()) return;
-  window.localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+  const serialized = JSON.stringify(settings);
+  window.localStorage.setItem(STORAGE_KEYS.SETTINGS, serialized);
+  cachedSettingsRaw = serialized;
+  cachedSettingsValue = settings;
   notifyStorageChange();
 }
 
@@ -556,18 +592,21 @@ export function importAllData(rawJson: string): BoothDataSnapshot {
   };
 
   if (isBrowser()) {
-    window.localStorage.setItem(
-      STORAGE_KEYS.ORDERS,
-      JSON.stringify(parsed.orders)
-    );
-    window.localStorage.setItem(
-      STORAGE_KEYS.EXPENSES,
-      JSON.stringify(parsed.expenses)
-    );
-    window.localStorage.setItem(
-      STORAGE_KEYS.SETTINGS,
-      JSON.stringify(mergedSettings)
-    );
+    const ordersStr = JSON.stringify(parsed.orders);
+    const expensesStr = JSON.stringify(parsed.expenses);
+    const settingsStr = JSON.stringify(mergedSettings);
+
+    window.localStorage.setItem(STORAGE_KEYS.ORDERS, ordersStr);
+    window.localStorage.setItem(STORAGE_KEYS.EXPENSES, expensesStr);
+    window.localStorage.setItem(STORAGE_KEYS.SETTINGS, settingsStr);
+
+    cachedOrdersRaw = ordersStr;
+    cachedOrdersValue = parsed.orders;
+    cachedExpensesRaw = expensesStr;
+    cachedExpensesValue = parsed.expenses;
+    cachedSettingsRaw = settingsStr;
+    cachedSettingsValue = mergedSettings;
+
     notifyStorageChange();
   }
 
@@ -581,21 +620,8 @@ export function importAllData(rawJson: string): BoothDataSnapshot {
 }
 
 // ----------------------------------------------------------------------------
-// Referentially Stable Snapshot Getters (for React useSyncExternalStore)
+// Snapshot Getters (for React useSyncExternalStore)
 // ----------------------------------------------------------------------------
-
-const SERVER_ORDERS_SNAPSHOT: Order[] = [];
-const SERVER_EXPENSES_SNAPSHOT: Expense[] = [];
-const SERVER_SETTINGS_SNAPSHOT: BoothSettings = createDefaultSettings();
-
-let cachedOrdersRaw: string | null = null;
-let cachedOrdersValue: Order[] = SERVER_ORDERS_SNAPSHOT;
-
-let cachedExpensesRaw: string | null = null;
-let cachedExpensesValue: Expense[] = SERVER_EXPENSES_SNAPSHOT;
-
-let cachedSettingsRaw: string | null = null;
-let cachedSettingsValue: BoothSettings = SERVER_SETTINGS_SNAPSHOT;
 
 export function getOrdersSnapshot(): Order[] {
   if (!isBrowser()) return SERVER_ORDERS_SNAPSHOT;
@@ -669,6 +695,7 @@ export const localStorageBoothAdapter: BoothStorageAdapter = {
   saveOrders,
   addOrder,
   updateOrderStatus,
+  deleteOrder,
   clearOrdersOnly,
   getExpenses,
   saveExpenses,

@@ -6,14 +6,14 @@ import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 const notoSansThai = Noto_Sans_Thai({
   variable: "--font-thai",
   subsets: ["thai", "latin"],
-  weight: ["400", "500", "600", "700", "800"],
+  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
 const plusJakarta = Plus_Jakarta_Sans({
   variable: "--font-jakarta",
   subsets: ["latin"],
-  weight: ["500", "600", "700", "800"],
+  weight: ["500", "600", "700"],
   display: "swap",
 });
 
@@ -48,7 +48,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: "#FFFBF2",
+  themeColor: "#F6F5F2",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -57,7 +57,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="th"
       className={`${notoSansThai.variable} ${plusJakarta.variable} h-full antialiased`}
     >
-      <body className="min-h-full bg-[#FFFBF2] text-[#1C1917] flex flex-col">
+      <body className="min-h-full bg-[#F6F5F2] text-[#1C1917] flex flex-col">
         <ServiceWorkerRegister />
         {children}
       </body>

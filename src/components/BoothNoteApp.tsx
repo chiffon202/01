@@ -1,12 +1,25 @@
 "use client";
 
-import React, { useCallback, useMemo, useState, useSyncExternalStore } from "react";
-import { ClipboardList, PieChart, WifiOff } from "lucide-react";
+import React, {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import {
+  CheckCircle2,
+  ClipboardList,
+  PieChart,
+  WifiOff,
+  AlertCircle,
+} from "lucide-react";
 import {
   BoothSettings,
   NewOrderItemInput,
   OrderStatus,
   PaymentMethod,
+  formatQueueNumber,
   formatThaiDateLabel,
   getExpensesSnapshot,
   getOrdersSnapshot,
@@ -23,6 +36,11 @@ import { BudgetTab } from "@/components/BudgetTab";
 
 type ActiveTab = "order" | "budget";
 
+interface ToastState {
+  message: string;
+  tone: "success" | "error";
+}
+
 const emptySubscribe = () => () => {};
 
 function subscribeOnlineStatus(callback: () => void): () => void {
@@ -37,6 +55,22 @@ function subscribeOnlineStatus(callback: () => void): () => void {
 
 export function BoothNoteApp() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("order");
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const showToast = useCallback(
+    (message: string, tone: "success" | "error" = "success") => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+      setToast({ message, tone });
+      toastTimerRef.current = window.setTimeout(() => {
+        setToast(null);
+        toastTimerRef.current = null;
+      }, 2400);
+    },
+    []
+  );
 
   const hydrated = useSyncExternalStore(
     emptySubscribe,
@@ -84,16 +118,32 @@ export function BoothNoteApp() {
       paymentMethod: PaymentMethod;
     }) => {
       const { order } = localStorageBoothAdapter.addOrder(input);
+      showToast(`บันทึกคิว ${formatQueueNumber(order.queueNumber)} แล้ว`);
       return order;
     },
-    []
+    [showToast]
   );
 
   const handleUpdateOrderStatus = useCallback(
     (orderId: string, status: OrderStatus) => {
       localStorageBoothAdapter.updateOrderStatus(orderId, status);
+      if (status === "done") {
+        showToast("ส่งของเรียบร้อยแล้ว");
+      } else if (status === "void") {
+        showToast("ยกเลิกบิลแล้ว");
+      } else {
+        showToast("กู้คืนเข้าคิวรอทำแล้ว");
+      }
     },
-    []
+    [showToast]
+  );
+
+  const handleDeleteOrder = useCallback(
+    (orderId: string) => {
+      localStorageBoothAdapter.deleteOrder(orderId);
+      showToast("ลบบิลออกจากประวัติแล้ว");
+    },
+    [showToast]
   );
 
   const handleUpdateSettings = useCallback((next: BoothSettings) => {
@@ -103,24 +153,32 @@ export function BoothNoteApp() {
   const handleAddExpense = useCallback(
     (input: { title: string; amount: number }) => {
       localStorageBoothAdapter.addExpense(input);
+      showToast(`บันทึกรายจ่าย "${input.title}" แล้ว`);
     },
-    []
+    [showToast]
   );
 
   const handleUpdateExpense = useCallback(
     (id: string, patch: { title: string; amount: number }) => {
       localStorageBoothAdapter.updateExpense(id, patch);
+      showToast("แก้ไขรายจ่ายแล้ว");
     },
-    []
+    [showToast]
   );
 
-  const handleDeleteExpense = useCallback((id: string) => {
-    localStorageBoothAdapter.deleteExpense(id);
-  }, []);
+  const handleDeleteExpense = useCallback(
+    (id: string) => {
+      localStorageBoothAdapter.deleteExpense(id);
+      showToast("ลบรายการรายจ่ายแล้ว");
+    },
+    [showToast]
+  );
 
   const handleClearOrdersOnly = useCallback(() => {
+    const count = localStorageBoothAdapter.getOrders().length;
     localStorageBoothAdapter.clearOrdersOnly();
-  }, []);
+    showToast(`ล้างบิลทดสอบ ${count} บิลแล้ว · รีเซ็ตคิวเป็น #01`);
+  }, [showToast]);
 
   const handleExportJson = useCallback(() => {
     const snapshot = localStorageBoothAdapter.exportAllData();
@@ -135,53 +193,81 @@ export function BoothNoteApp() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, []);
+    showToast("ดาวน์โหลดไฟล์สำรอง JSON แล้ว");
+  }, [showToast]);
 
   const handleImportJson = useCallback((raw: string) => {
     localStorageBoothAdapter.importAllData(raw);
   }, []);
 
+  const handleSwitchTab = useCallback((nextTab: ActiveTab) => {
+    setActiveTab(nextTab);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+    }
+  }, []);
+
   return (
-    <div className="min-h-dvh flex flex-col bg-[#FFFBF2]">
-      {/* Compact Sticky App Header */}
-      <header className="sticky top-0 z-30 bg-[#FFFBF2]/90 backdrop-blur-md border-b border-[#E9DFCE]">
-        <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between gap-2">
+    <div className="min-h-dvh flex flex-col bg-[#F6F5F2]">
+      {/* Minimal Sticky Header */}
+      <header className="sticky top-0 z-30 bg-[#F6F5F2]/90 backdrop-blur-md border-b border-stone-200/70">
+        <div className="max-w-xl mx-auto px-4 h-14 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5">
-            <span className="w-8 h-8 rounded-xl bg-amber-500 text-white font-black text-base flex items-center justify-center shadow-xs">
+            <span className="w-8 h-8 rounded-xl bg-amber-500 text-white font-bold text-sm flex items-center justify-center shadow-2xs">
               B
             </span>
             <div>
-              <h1 className="text-base font-extrabold text-stone-900 leading-none">
+              <h1 className="text-[15px] font-bold text-stone-900 leading-none">
                 {settings.boothName}
               </h1>
-              <p className="text-[11px] font-medium text-stone-500 mt-0.5">
-                {todayLabel} · เวลาไทย (+07:00)
-              </p>
+              <p className="text-[11px] text-stone-400 mt-0.5">{todayLabel}</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            {!isOnline ? (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 text-[11px] font-bold">
-                <WifiOff className="w-3 h-3" />
-                โหมดออฟไลน์
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-stone-100 text-stone-600 text-[11px] font-semibold">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                พร้อมใช้งานออฟไลน์
-              </span>
-            )}
-          </div>
+          {!isOnline ? (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-100/90 text-amber-900 text-[11px] font-medium">
+              <WifiOff className="w-3 h-3" />
+              ออฟไลน์
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-stone-200/80 text-stone-500 text-[11px] font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              พร้อมออฟไลน์
+            </span>
+          )}
         </div>
       </header>
 
-      {/* Main Scrollable Content */}
-      <main className="flex-1 w-full max-w-2xl mx-auto px-3.5 sm:px-5 pt-4 pb-28">
+      {/* Subtle Floating Toast Feedback */}
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-16 inset-x-0 z-50 flex justify-center px-4 pointer-events-none"
+        >
+          <div
+            className={`px-4 py-2 rounded-full shadow-lg text-xs font-medium inline-flex items-center gap-2 ${
+              toast.tone === "error"
+                ? "bg-rose-600 text-white"
+                : "bg-stone-900 text-white"
+            }`}
+          >
+            {toast.tone === "error" ? (
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            )}
+            <span>{toast.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content */}
+      <main className="flex-1 w-full max-w-xl mx-auto px-4 pt-4 pb-32">
         {!hydrated ? (
           <div className="space-y-4 animate-pulse">
-            <div className="h-72 rounded-3xl bg-white border border-[#E9DFCE]" />
-            <div className="h-36 rounded-3xl bg-white border border-[#E9DFCE]" />
+            <div className="h-72 rounded-3xl bg-white border border-stone-200/70" />
+            <div className="h-32 rounded-2xl bg-white border border-stone-200/70" />
           </div>
         ) : activeTab === "order" ? (
           <OrderTab
@@ -190,6 +276,7 @@ export function BoothNoteApp() {
             todayKey={todayKey}
             onAddOrder={handleAddOrder}
             onUpdateOrderStatus={handleUpdateOrderStatus}
+            onDeleteOrder={handleDeleteOrder}
           />
         ) : (
           <BudgetTab
@@ -204,34 +291,39 @@ export function BoothNoteApp() {
             onClearOrdersOnly={handleClearOrdersOnly}
             onExportJson={handleExportJson}
             onImportJson={handleImportJson}
+            onNotify={showToast}
           />
         )}
       </main>
 
-      {/* Fixed 2-Tab Bottom Navigation Bar */}
+      {/* Airy Fixed 2-Tab Bottom Navigation Bar */}
       <nav
         aria-label="เมนูหลักด้านล่าง"
-        className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#E9DFCE] shadow-[0_-4px_20px_-6px_rgba(28,25,23,0.08)] pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+        className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200/80 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
       >
-        <div className="max-w-2xl mx-auto px-3 pt-1.5 grid grid-cols-2 gap-2">
+        <div className="max-w-xl mx-auto px-4 pt-2 pb-1 grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => setActiveTab("order")}
+            onClick={() => handleSwitchTab("order")}
             aria-current={activeTab === "order" ? "page" : undefined}
-            className={`min-h-[54px] rounded-2xl px-3 py-2 flex items-center justify-center gap-2 font-extrabold text-sm transition-all active:scale-[0.98] ${
+            className={`min-h-[48px] rounded-2xl px-3 py-2 flex items-center justify-center gap-2 text-sm font-semibold transition-all active:scale-[0.98] ${
               activeTab === "order"
-                ? "bg-stone-900 text-amber-300 shadow-xs"
-                : "text-stone-600 hover:bg-stone-100"
+                ? "bg-amber-50 text-amber-900"
+                : "text-stone-500 hover:bg-stone-50"
             }`}
           >
-            <ClipboardList className="w-5 h-5 shrink-0" />
+            <ClipboardList
+              className={`w-5 h-5 shrink-0 ${
+                activeTab === "order" ? "text-amber-600" : "text-stone-400"
+              }`}
+            />
             <span>จดออเดอร์</span>
             {pendingCount > 0 && (
               <span
-                className={`px-2 py-0.5 rounded-full text-xs font-extrabold tabular-nums ${
+                className={`min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold tabular-nums inline-flex items-center justify-center ${
                   activeTab === "order"
-                    ? "bg-amber-400 text-stone-900"
-                    : "bg-amber-500 text-white"
+                    ? "bg-amber-500 text-white"
+                    : "bg-stone-200 text-stone-700"
                 }`}
               >
                 {pendingCount}
@@ -241,15 +333,19 @@ export function BoothNoteApp() {
 
           <button
             type="button"
-            onClick={() => setActiveTab("budget")}
+            onClick={() => handleSwitchTab("budget")}
             aria-current={activeTab === "budget" ? "page" : undefined}
-            className={`min-h-[54px] rounded-2xl px-3 py-2 flex items-center justify-center gap-2 font-extrabold text-sm transition-all active:scale-[0.98] ${
+            className={`min-h-[48px] rounded-2xl px-3 py-2 flex items-center justify-center gap-2 text-sm font-semibold transition-all active:scale-[0.98] ${
               activeTab === "budget"
-                ? "bg-stone-900 text-amber-300 shadow-xs"
-                : "text-stone-600 hover:bg-stone-100"
+                ? "bg-amber-50 text-amber-900"
+                : "text-stone-500 hover:bg-stone-50"
             }`}
           >
-            <PieChart className="w-5 h-5 shrink-0" />
+            <PieChart
+              className={`w-5 h-5 shrink-0 ${
+                activeTab === "budget" ? "text-amber-600" : "text-stone-400"
+              }`}
+            />
             <span>งบ &amp; สรุปยอด</span>
           </button>
         </div>

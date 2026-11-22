@@ -2,21 +2,17 @@
 
 import React, { useMemo, useState } from "react";
 import {
+  Banknote,
   Check,
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Clock,
   Minus,
   Plus,
-  RotateCcw,
-  ShoppingBag,
-  Sparkles,
-  Trash2,
-  Wallet,
-  X,
-  Banknote,
   QrCode,
+  RotateCcw,
+  Trash2,
+  X,
 } from "lucide-react";
 import {
   BoothSettings,
@@ -42,6 +38,7 @@ interface OrderTabProps {
     paymentMethod: PaymentMethod;
   }) => Order;
   onUpdateOrderStatus: (orderId: string, status: OrderStatus) => void;
+  onDeleteOrder: (orderId: string) => void;
 }
 
 interface DraftBillItem extends NewOrderItemInput {
@@ -59,6 +56,7 @@ export function OrderTab({
   todayKey,
   onAddOrder,
   onUpdateOrderStatus,
+  onDeleteOrder,
 }: OrderTabProps) {
   const activeMenus = useMemo(
     () => settings.menus.filter((m) => m.active),
@@ -79,9 +77,10 @@ export function OrderTab({
   const [customNote, setCustomNote] = useState<string>("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("make");
   const [historyOpen, setHistoryOpen] = useState<boolean>(false);
-  const [justSavedQueue, setJustSavedQueue] = useState<string | null>(null);
+  const [confirmDeleteOrderId, setConfirmDeleteOrderId] = useState<
+    string | null
+  >(null);
 
-  // Ensure selectedMenuId stays valid if menus were edited in Settings
   const currentMenu = useMemo(() => {
     return (
       activeMenus.find((m) => m.id === selectedMenuId) ??
@@ -188,7 +187,6 @@ export function OrderTab({
         },
       ];
     });
-    // Reset toppings & qty so next variation can be picked in 1 tap
     setSelectedToppingIds([]);
     setQuantity(1);
   };
@@ -235,7 +233,7 @@ export function OrderTab({
             },
           ];
 
-    const created = onAddOrder({
+    onAddOrder({
       items: itemsToSave,
       noteTags: selectedNoteTags,
       note: customNote,
@@ -252,104 +250,70 @@ export function OrderTab({
     if (activeMenus[0]) {
       setSelectedMenuId(activeMenus[0].id);
     }
-
-    const qLabel = formatQueueNumber(created.queueNumber);
-    setJustSavedQueue(qLabel);
-    window.setTimeout(() => {
-      setJustSavedQueue((curr) => (curr === qLabel ? null : curr));
-    }, 2200);
   };
 
-  const hasUnaddedBuilderChanges =
+  const hasPendingVariationToAdd =
     billItems.length > 0 && (selectedToppingIds.length > 0 || quantity > 1);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {/* =================================================================== */}
-      {/* TOP SECTION: 2-SECOND FAST ORDER ENTRY FORM                         */}
+      {/* 1. STREAMLINED 2-SECOND ORDER ENTRY CARD                            */}
       {/* =================================================================== */}
       <section
         aria-label="ฟอร์มจดออเดอร์ด่วน"
-        className="rounded-3xl bg-white border border-[#E9DFCE] shadow-[0_6px_24px_-8px_rgba(120,74,12,0.12)] p-4 sm:p-5 space-y-4"
+        className="rounded-3xl bg-white border border-stone-200/80 shadow-[0_2px_14px_-4px_rgba(28,25,23,0.06)] p-4 sm:p-5 space-y-4"
       >
-        {/* Header strip */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm">
-              <Sparkles className="w-4 h-4" />
-            </span>
-            <div>
-              <h2 className="text-base font-bold text-stone-900 leading-tight">
-                จดออเดอร์หน้าร้าน
-              </h2>
-              <p className="text-xs text-stone-500">
-                คิวถัดไป:{" "}
-                <span className="font-bold text-amber-700 tabular-nums">
-                  {nextQueuePreview}
-                </span>
-              </p>
-            </div>
-          </div>
-
-          {justSavedQueue && (
-            <div
-              role="status"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold animate-pulse"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              บันทึก {justSavedQueue} แล้ว
-            </div>
-          )}
+        {/* Top Row: Heading & Next Queue */}
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-stone-900">
+            รับออเดอร์ใหม่
+          </h2>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 text-xs font-semibold tabular-nums">
+            คิวถัดไป {nextQueuePreview}
+          </span>
         </div>
 
-        {/* 1. Menu Selection */}
-        <div className="space-y-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">
-            เมนูหลัก
-          </div>
-          <div
-            className={`grid gap-2 ${
-              activeMenus.length === 1 ? "grid-cols-1" : "grid-cols-2"
-            }`}
-          >
-            {activeMenus.map((menu) => {
-              const isSelected = currentMenu?.id === menu.id;
-              return (
-                <button
-                  key={menu.id}
-                  type="button"
-                  onClick={() => setSelectedMenuId(menu.id)}
-                  className={`min-h-[54px] px-4 py-3 rounded-2xl border-2 text-left transition-all active:scale-[0.98] flex items-center justify-between gap-2 ${
+        {/* Menu Selection */}
+        <div
+          className={`grid gap-2 ${
+            activeMenus.length === 1 ? "grid-cols-1" : "grid-cols-2"
+          }`}
+        >
+          {activeMenus.map((menu) => {
+            const isSelected = currentMenu?.id === menu.id;
+            return (
+              <button
+                key={menu.id}
+                type="button"
+                onClick={() => setSelectedMenuId(menu.id)}
+                className={`min-h-[52px] px-4 py-3 rounded-2xl border text-left transition-all active:scale-[0.99] flex items-center justify-between gap-2 ${
+                  isSelected
+                    ? "bg-amber-50/70 border-amber-400/90 text-stone-900"
+                    : "bg-stone-50/80 border-stone-200/80 text-stone-600 hover:bg-stone-100/70"
+                }`}
+              >
+                <span className="font-semibold text-[15px] leading-snug">
+                  {menu.name}
+                </span>
+                <span
+                  className={`shrink-0 text-sm font-bold tabular-nums px-2.5 py-0.5 rounded-full ${
                     isSelected
-                      ? "bg-amber-50 border-amber-500 text-stone-900 shadow-sm"
-                      : "bg-stone-50 border-stone-200 text-stone-700 hover:border-amber-300"
+                      ? "bg-amber-500 text-white"
+                      : "bg-stone-200/80 text-stone-700"
                   }`}
                 >
-                  <span className="font-bold text-base leading-snug">
-                    {menu.name}
-                  </span>
-                  <span
-                    className={`shrink-0 px-2.5 py-1 rounded-xl text-sm font-extrabold tabular-nums ${
-                      isSelected
-                        ? "bg-amber-500 text-white"
-                        : "bg-stone-200 text-stone-700"
-                    }`}
-                  >
-                    ฿{formatBaht(menu.price)}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+                  ฿{formatBaht(menu.price)}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* 2. Toppings Toggle + Quantity Stepper */}
-        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-start">
-          {/* Toppings */}
-          <div className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">
-              ท็อปปิ้ง (กดเลือกได้หลายอย่าง)
-            </div>
+        {/* Toppings */}
+        {activeToppings.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="text-xs font-medium text-stone-500">ท็อปปิ้ง</div>
             <div className="grid grid-cols-2 gap-2">
               {activeToppings.map((topping) => {
                 const active = selectedToppingIds.includes(topping.id);
@@ -359,23 +323,23 @@ export function OrderTab({
                     type="button"
                     onClick={() => toggleTopping(topping.id)}
                     aria-pressed={active}
-                    className={`min-h-[50px] px-3 py-2.5 rounded-2xl border-2 font-bold text-sm transition-all active:scale-[0.97] flex items-center justify-between gap-1.5 ${
+                    className={`min-h-[46px] px-3.5 py-2 rounded-2xl border text-sm font-medium transition-all active:scale-[0.98] flex items-center justify-between gap-2 ${
                       active
-                        ? "bg-amber-500 border-amber-600 text-white shadow-sm"
-                        : "bg-white border-stone-200 text-stone-800 hover:border-amber-300"
+                        ? "bg-amber-500 border-amber-500 text-white shadow-2xs"
+                        : "bg-stone-50/80 border-stone-200/80 text-stone-700 hover:bg-stone-100/70"
                     }`}
                   >
                     <span className="flex items-center gap-1.5 truncate">
                       {active ? (
                         <Check className="w-4 h-4 shrink-0" />
                       ) : (
-                        <Plus className="w-4 h-4 shrink-0 text-amber-600" />
+                        <Plus className="w-3.5 h-3.5 shrink-0 text-stone-400" />
                       )}
                       <span className="truncate">{topping.name}</span>
                     </span>
                     <span
-                      className={`text-xs font-extrabold tabular-nums shrink-0 ${
-                        active ? "text-amber-100" : "text-amber-700"
+                      className={`text-xs font-semibold tabular-nums shrink-0 ${
+                        active ? "text-amber-50" : "text-stone-500"
                       }`}
                     >
                       +{formatBaht(topping.price)}
@@ -385,160 +349,135 @@ export function OrderTab({
               })}
             </div>
           </div>
+        )}
 
-          {/* Quantity Stepper */}
-          <div className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">
-              จำนวนแก้ว
+        {/* Quantity Stepper + Add to Multi-Item Bill (Single Clean Row) */}
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-1 bg-stone-100/90 rounded-2xl p-1 shrink-0">
+            <button
+              type="button"
+              aria-label="ลดจำนวนแก้ว"
+              onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+              disabled={quantity <= 1}
+              className="w-10 h-10 rounded-xl bg-white text-stone-700 flex items-center justify-center shadow-2xs active:scale-95 disabled:opacity-35"
+            >
+              <Minus className="w-4 h-4" />
+            </button>
+            <div className="min-w-[46px] text-center">
+              <span className="text-base font-bold tabular-nums text-stone-900">
+                {quantity}
+              </span>
+              <span className="text-[11px] text-stone-500 ml-0.5">แก้ว</span>
             </div>
-            <div className="flex items-center justify-between sm:justify-start gap-2 bg-[#FAF5EB] border border-[#E9DFCE] rounded-2xl p-1.5">
-              <button
-                type="button"
-                aria-label="ลดจำนวนแก้ว"
-                onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                className="w-12 h-11 rounded-xl bg-white border border-stone-200 flex items-center justify-center text-stone-800 active:scale-95 shadow-xs disabled:opacity-40"
-                disabled={quantity <= 1}
-              >
-                <Minus className="w-5 h-5" />
-              </button>
-              <div className="min-w-[56px] text-center">
-                <span className="text-xl font-extrabold tabular-nums text-stone-900">
-                  {quantity}
-                </span>
-                <span className="text-xs text-stone-500 ml-1">แก้ว</span>
-              </div>
-              <button
-                type="button"
-                aria-label="เพิ่มจำนวนแก้ว"
-                onClick={() => setQuantity((q) => q + 1)}
-                className="w-12 h-11 rounded-xl bg-amber-500 text-white flex items-center justify-center active:scale-95 shadow-xs"
-              >
-                <Plus className="w-5 h-5" />
-              </button>
-            </div>
+            <button
+              type="button"
+              aria-label="เพิ่มจำนวนแก้ว"
+              onClick={() => setQuantity((q) => q + 1)}
+              className="w-10 h-10 rounded-xl bg-white text-stone-800 flex items-center justify-center shadow-2xs active:scale-95"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
           </div>
-        </div>
 
-        {/* 3. Add to Multi-Item Bill Button & Current Bill Preview */}
-        <div className="space-y-2.5">
           <button
             type="button"
             onClick={handleAddToBill}
-            className={`w-full min-h-[46px] px-4 py-2.5 rounded-2xl border-2 font-bold text-sm transition-all active:scale-[0.99] flex items-center justify-center gap-2 ${
-              hasUnaddedBuilderChanges
-                ? "border-amber-500 bg-amber-50 text-amber-900 ring-2 ring-amber-300/60"
-                : "border-dashed border-amber-400 bg-[#FFFDF8] text-amber-800 hover:bg-amber-50"
+            className={`flex-1 min-h-[48px] px-3.5 py-2 rounded-2xl border text-sm font-medium transition-all active:scale-[0.98] flex items-center justify-center gap-1.5 ${
+              hasPendingVariationToAdd
+                ? "bg-amber-50 border-amber-400 text-amber-900 font-semibold"
+                : "bg-white border-stone-200 text-stone-700 hover:bg-stone-50"
             }`}
           >
-            <ShoppingBag className="w-4 h-4" />
-            <span>
-              + เพิ่มลงรายการบิล ({currentMenu?.name}
-              {currentToppings.length > 0
-                ? ` +${currentToppings.map((t) => t.name).join(" +")}`
-                : ""}{" "}
-              ×{quantity} = ฿{formatBaht(builderSubtotal)})
+            <Plus className="w-4 h-4 text-amber-600 shrink-0" />
+            <span className="truncate">
+              เพิ่มลงบิล (฿{formatBaht(builderSubtotal)})
             </span>
           </button>
-
-          {billItems.length > 0 ? (
-            <div className="rounded-2xl bg-[#FAF5EB] border border-[#E9DFCE] p-3 space-y-2">
-              <div className="flex items-center justify-between text-xs font-bold text-stone-600">
-                <span>รายการในบิลนี้ ({billItems.length} แบบ)</span>
-                <button
-                  type="button"
-                  onClick={() => setBillItems([])}
-                  className="text-rose-600 hover:underline font-semibold"
-                >
-                  ล้างรายการบิล
-                </button>
-              </div>
-              <ul className="space-y-1.5">
-                {billItems.map((item) => {
-                  const topSum = item.toppings.reduce((s, t) => s + t.price, 0);
-                  const lineTotal = (item.unitPrice + topSum) * item.quantity;
-                  return (
-                    <li
-                      key={item.draftKey}
-                      className="flex items-center justify-between gap-2 bg-white rounded-xl px-3 py-2 border border-[#EFE6D6]"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-sm font-bold text-stone-900 truncate">
-                          {item.menuName}
-                        </div>
-                        {item.toppings.length > 0 ? (
-                          <div className="text-xs font-medium text-amber-700">
-                            +{item.toppings.map((t) => t.name).join(", +")}
-                          </div>
-                        ) : (
-                          <div className="text-xs text-stone-400">ธรรมดา</div>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <div className="flex items-center gap-1 bg-stone-100 rounded-lg p-0.5">
-                          <button
-                            type="button"
-                            aria-label="ลดรายการนี้"
-                            onClick={() =>
-                              handleAdjustBillItemQty(item.draftKey, -1)
-                            }
-                            className="w-7 h-7 rounded-md bg-white flex items-center justify-center text-stone-700 shadow-2xs active:scale-95"
-                          >
-                            <Minus className="w-3.5 h-3.5" />
-                          </button>
-                          <span className="w-6 text-center text-sm font-bold tabular-nums">
-                            {item.quantity}
-                          </span>
-                          <button
-                            type="button"
-                            aria-label="เพิ่มรายการนี้"
-                            onClick={() =>
-                              handleAdjustBillItemQty(item.draftKey, 1)
-                            }
-                            className="w-7 h-7 rounded-md bg-white flex items-center justify-center text-stone-700 shadow-2xs active:scale-95"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-
-                        <span className="min-w-[44px] text-right text-sm font-extrabold tabular-nums text-stone-900">
-                          ฿{formatBaht(lineTotal)}
-                        </span>
-
-                        <button
-                          type="button"
-                          aria-label="ลบรายการนี้"
-                          onClick={() => handleRemoveBillItem(item.draftKey)}
-                          className="w-7 h-7 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ) : (
-            <div className="rounded-xl bg-[#FAF5EB]/70 border border-[#EFE6D6] px-3 py-2 flex items-center justify-between text-xs text-stone-600">
-              <span>
-                พร้อมบันทึกทันที:{" "}
-                <strong className="text-stone-900">
-                  {currentMenu?.name}
-                  {currentToppings.length > 0
-                    ? ` (+${currentToppings.map((t) => t.name).join(", +")})`
-                    : " (ธรรมดา)"}
-                </strong>{" "}
-                ×{quantity} แก้ว
-              </span>
-              <span className="font-bold text-amber-800 tabular-nums">
-                ฿{formatBaht(builderSubtotal)}
-              </span>
-            </div>
-          )}
         </div>
 
-        {/* 4. Quick Note Tags + Short Note Input */}
+        {/* Multi-Item Bill List (only rendered when user added items to bill) */}
+        {billItems.length > 0 && (
+          <div className="rounded-2xl bg-stone-50/90 border border-stone-200/70 p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs text-stone-500">
+              <span className="font-medium">
+                รายการในบิลนี้ ({billItems.length} แบบ)
+              </span>
+              <button
+                type="button"
+                onClick={() => setBillItems([])}
+                className="text-rose-600 hover:underline font-medium"
+              >
+                ล้างบิล
+              </button>
+            </div>
+            <ul className="divide-y divide-stone-200/70">
+              {billItems.map((item) => {
+                const topSum = item.toppings.reduce((s, t) => s + t.price, 0);
+                const lineTotal = (item.unitPrice + topSum) * item.quantity;
+                return (
+                  <li
+                    key={item.draftKey}
+                    className="py-2 first:pt-0.5 last:pb-0 flex items-center justify-between gap-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-stone-900 truncate">
+                        {item.menuName}
+                      </div>
+                      <div className="text-xs text-stone-500">
+                        {item.toppings.length > 0
+                          ? `+${item.toppings.map((t) => t.name).join(", +")}`
+                          : "ธรรมดา"}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-1 bg-white rounded-xl border border-stone-200/80 p-0.5">
+                        <button
+                          type="button"
+                          aria-label="ลดรายการนี้"
+                          onClick={() =>
+                            handleAdjustBillItemQty(item.draftKey, -1)
+                          }
+                          className="w-6 h-6 rounded-lg flex items-center justify-center text-stone-600 hover:bg-stone-100"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <span className="w-5 text-center text-xs font-bold tabular-nums">
+                          {item.quantity}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label="เพิ่มรายการนี้"
+                          onClick={() =>
+                            handleAdjustBillItemQty(item.draftKey, 1)
+                          }
+                          className="w-6 h-6 rounded-lg flex items-center justify-center text-stone-600 hover:bg-stone-100"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
+
+                      <span className="min-w-[42px] text-right text-sm font-semibold tabular-nums text-stone-900">
+                        ฿{formatBaht(lineTotal)}
+                      </span>
+
+                      <button
+                        type="button"
+                        aria-label="ลบรายการนี้"
+                        onClick={() => handleRemoveBillItem(item.draftKey)}
+                        className="w-6 h-6 rounded-lg text-stone-400 hover:text-rose-600 flex items-center justify-center"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {/* Quick Notes + Short Note Input */}
         <div className="space-y-2">
           <div className="flex flex-wrap gap-1.5">
             {settings.quickNotes.map((tag) => {
@@ -549,13 +488,13 @@ export function OrderTab({
                   type="button"
                   onClick={() => toggleNoteTag(tag)}
                   aria-pressed={active}
-                  className={`min-h-[38px] px-3.5 py-1.5 rounded-full text-xs font-bold border transition-all active:scale-95 ${
+                  className={`min-h-[34px] px-3 py-1 rounded-full text-xs font-medium transition-all active:scale-95 ${
                     active
-                      ? "bg-stone-800 border-stone-800 text-amber-300 shadow-xs"
-                      : "bg-stone-100 border-stone-200 text-stone-700 hover:bg-stone-200/70"
+                      ? "bg-stone-800 text-white"
+                      : "bg-stone-100 text-stone-600 hover:bg-stone-200/70"
                   }`}
                 >
-                  {active ? "✓ " : "+ "}
+                  {active ? "✓ " : ""}
                   {tag}
                 </button>
               );
@@ -567,16 +506,16 @@ export function OrderTab({
               type="text"
               value={customNote}
               onChange={(e) => setCustomNote(e.target.value)}
-              placeholder="โน้ตเพิ่มเติมสั้นๆ (ถ้ามี)..."
+              placeholder="โน้ตเพิ่มเติม (ถ้ามี)..."
               maxLength={80}
-              className="w-full min-h-[42px] pl-3.5 pr-9 py-2 rounded-xl bg-stone-50 border border-stone-200 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:bg-white"
+              className="w-full min-h-[42px] pl-3.5 pr-9 py-2 rounded-xl bg-stone-50 border border-stone-200/70 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:border-amber-400 focus:bg-white transition-colors"
             />
             {customNote && (
               <button
                 type="button"
                 aria-label="ล้างโน้ต"
                 onClick={() => setCustomNote("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-stone-200 text-stone-600 flex items-center justify-center"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-stone-200/80 text-stone-600 flex items-center justify-center"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -584,196 +523,188 @@ export function OrderTab({
           </div>
         </div>
 
-        {/* 5. Payment Method (2 large buttons: MAKE default vs Cash) */}
-        <div className="grid grid-cols-2 gap-2.5">
+        {/* Payment Method — Clean Segmented Switch */}
+        <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-stone-100">
           <button
             type="button"
             onClick={() => setPaymentMethod("make")}
             aria-pressed={paymentMethod === "make"}
-            className={`min-h-[54px] px-3 py-2.5 rounded-2xl border-2 font-bold transition-all active:scale-[0.98] flex items-center justify-center gap-2 ${
+            className={`min-h-[46px] px-3 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98] flex items-center justify-center gap-2 ${
               paymentMethod === "make"
-                ? "bg-teal-600 border-teal-700 text-white shadow-sm"
-                : "bg-teal-50/50 border-teal-200 text-teal-800 hover:bg-teal-50"
+                ? "bg-teal-600 text-white shadow-xs"
+                : "text-stone-600 hover:text-stone-900"
             }`}
           >
-            <QrCode className="w-5 h-5 shrink-0" />
-            <span className="text-sm sm:text-base">โอน (MAKE)</span>
+            <QrCode className="w-4 h-4 shrink-0" />
+            <span>โอน (MAKE)</span>
           </button>
 
           <button
             type="button"
             onClick={() => setPaymentMethod("cash")}
             aria-pressed={paymentMethod === "cash"}
-            className={`min-h-[54px] px-3 py-2.5 rounded-2xl border-2 font-bold transition-all active:scale-[0.98] flex items-center justify-center gap-2 ${
+            className={`min-h-[46px] px-3 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98] flex items-center justify-center gap-2 ${
               paymentMethod === "cash"
-                ? "bg-orange-600 border-orange-700 text-white shadow-sm"
-                : "bg-orange-50/50 border-orange-200 text-orange-800 hover:bg-orange-50"
+                ? "bg-amber-600 text-white shadow-xs"
+                : "text-stone-600 hover:text-stone-900"
             }`}
           >
-            <Banknote className="w-5 h-5 shrink-0" />
-            <span className="text-sm sm:text-base">เงินสด</span>
+            <Banknote className="w-4 h-4 shrink-0" />
+            <span>เงินสด</span>
           </button>
         </div>
 
-        {/* 6. Big Total + Save Order CTA */}
-        <div className="pt-1 flex items-stretch gap-3">
-          <div className="shrink-0 min-w-[116px] rounded-2xl bg-[#FAF5EB] border border-[#E9DFCE] px-3.5 py-2 flex flex-col justify-center">
-            <span className="text-[11px] font-semibold text-stone-500">
-              ยอดรวม ({effectiveCupCount} แก้ว)
-            </span>
-            <span className="text-2xl sm:text-3xl font-extrabold text-stone-900 tabular-nums leading-tight">
+        {/* Footer Strip: Total & Primary Save CTA */}
+        <div className="pt-2 border-t border-stone-100 flex items-center justify-between gap-4">
+          <div className="pl-1">
+            <div className="text-xs text-stone-500">
+              ยอดรวม · {effectiveCupCount} แก้ว
+            </div>
+            <div className="text-3xl font-bold text-stone-900 tabular-nums tracking-tight leading-tight">
               ฿{formatBaht(effectiveTotal)}
-            </span>
+            </div>
           </div>
 
           <button
             type="button"
             onClick={handleSaveOrder}
-            className="flex-1 min-h-[60px] px-5 py-3 rounded-2xl bg-stone-900 hover:bg-stone-800 text-amber-300 font-extrabold text-lg shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            className="flex-1 max-w-[230px] min-h-[54px] px-5 py-3 rounded-2xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-base shadow-sm active:scale-[0.98] transition-all flex items-center justify-center gap-2"
           >
-            <CheckCircle2 className="w-5 h-5" />
+            <Check className="w-5 h-5" />
             <span>บันทึกออเดอร์</span>
           </button>
         </div>
       </section>
 
       {/* =================================================================== */}
-      {/* BOTTOM SECTION: LIVE PENDING QUEUE (OLDEST -> NEWEST)               */}
+      {/* 2. LIVE PENDING QUEUE (OLDEST -> NEWEST)                            */}
       {/* =================================================================== */}
       <section aria-label="รายการคิวที่กำลังรอทำ" className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
-            <h2 className="text-base font-extrabold text-stone-900">
+            <h2 className="text-[15px] font-semibold text-stone-900">
               คิวที่กำลังรอทำ
             </h2>
-            <span className="px-2.5 py-0.5 rounded-full bg-amber-500 text-white text-xs font-extrabold tabular-nums">
+            <span className="min-w-[24px] h-6 px-2 rounded-full bg-amber-100 text-amber-900 text-xs font-bold tabular-nums inline-flex items-center justify-center">
               {pendingOrders.length}
             </span>
           </div>
-          <span className="text-xs text-stone-500 flex items-center gap-1">
+          <span className="text-xs text-stone-400 flex items-center gap-1">
             <Clock className="w-3.5 h-3.5" />
             มาก่อนอยู่บน
           </span>
         </div>
 
         {pendingOrders.length === 0 ? (
-          <div className="rounded-3xl bg-white/80 border border-dashed border-[#DFD2BC] p-7 text-center space-y-1">
-            <p className="text-sm font-bold text-stone-600">
+          <div className="rounded-2xl bg-white/70 border border-dashed border-stone-300/80 py-8 px-4 text-center space-y-1">
+            <p className="text-sm font-medium text-stone-600">
               ยังไม่มีคิวรอทำในตอนนี้
             </p>
             <p className="text-xs text-stone-400">
-              กด &ldquo;บันทึกออเดอร์&rdquo; ด้านบนเพื่อส่งคิวเข้าหน้าร้าน
+              กด &ldquo;บันทึกออเดอร์&rdquo; ด้านบน คิวจะแสดงที่นี่ทันที
             </p>
           </div>
         ) : (
-          <div className="space-y-2.5">
+          <div className="space-y-3">
             {pendingOrders.map((order) => {
               const isMake = order.paymentMethod === "make";
               const isOtherDay = order.dateKey !== todayKey;
               return (
                 <article
                   key={order.id}
-                  className="rounded-3xl bg-white border border-[#E9DFCE] shadow-xs overflow-hidden"
+                  className="rounded-2xl bg-white border border-stone-200/80 shadow-[0_1px_8px_-3px_rgba(28,25,23,0.05)] p-4 space-y-3"
                 >
-                  <div className="p-4 space-y-3">
-                    {/* Queue Header */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <span className="px-3 py-1 rounded-xl bg-amber-100 border border-amber-300 text-amber-900 font-extrabold text-lg tabular-nums">
-                          {formatQueueNumber(order.queueNumber)}
-                        </span>
-                        <div className="text-xs text-stone-500 tabular-nums">
-                          <span>{formatThailandTime(order.createdAt)} น.</span>
-                          {isOtherDay && (
-                            <span className="ml-1.5 px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 font-medium">
-                              {formatThaiDateLabel(order.dateKey)}
+                  {/* Ticket Header */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="px-2.5 py-1 rounded-xl bg-amber-100/90 text-amber-950 font-bold text-base tabular-nums">
+                        {formatQueueNumber(order.queueNumber)}
+                      </span>
+                      <span className="text-xs text-stone-400 tabular-nums">
+                        {formatThailandTime(order.createdAt)} น.
+                        {isOtherDay && (
+                          <span className="ml-1.5 text-stone-500">
+                            · {formatThaiDateLabel(order.dateKey)}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                          isMake
+                            ? "bg-teal-50 text-teal-700"
+                            : "bg-amber-50 text-amber-800"
+                        }`}
+                      >
+                        {isMake ? "โอน MAKE" : "เงินสด"}
+                      </span>
+                      <span className="text-lg font-bold text-stone-900 tabular-nums">
+                        ฿{formatBaht(order.totalAmount)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Ticket Items */}
+                  <ul className="divide-y divide-stone-100 border-t border-b border-stone-100 py-1.5">
+                    {order.items.map((item) => (
+                      <li
+                        key={item.id}
+                        className="py-1.5 flex items-baseline justify-between gap-3"
+                      >
+                        <div className="text-[15px] font-medium text-stone-900 leading-snug">
+                          <span>{item.menuName}</span>
+                          {item.toppings.length > 0 && (
+                            <span className="ml-1.5 text-amber-700 font-semibold">
+                              +{item.toppings.map((t) => t.name).join(" +")}
                             </span>
                           )}
                         </div>
-                      </div>
+                        <span className="shrink-0 text-sm font-bold text-stone-700 tabular-nums bg-stone-100 px-2.5 py-0.5 rounded-lg">
+                          ×{item.quantity}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
 
-                      <div className="flex items-center gap-2">
+                  {/* Notes */}
+                  {(order.noteTags.length > 0 || order.note) && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {order.noteTags.map((tag) => (
                         <span
-                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${
-                            isMake
-                              ? "bg-teal-100 text-teal-800"
-                              : "bg-orange-100 text-orange-800"
-                          }`}
+                          key={tag}
+                          className="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-900 text-xs font-medium border border-amber-200/70"
                         >
-                          {isMake ? (
-                            <Wallet className="w-3.5 h-3.5" />
-                          ) : (
-                            <Banknote className="w-3.5 h-3.5" />
-                          )}
-                          {isMake ? "โอน (MAKE)" : "เงินสด"}
+                          {tag}
                         </span>
-                        <span className="text-xl font-extrabold text-stone-900 tabular-nums">
-                          ฿{formatBaht(order.totalAmount)}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Order Items */}
-                    <ul className="space-y-1.5 bg-[#FAF7F0] rounded-2xl p-3 border border-[#EFE6D6]">
-                      {order.items.map((item) => (
-                        <li
-                          key={item.id}
-                          className="flex items-baseline justify-between gap-2 text-base"
-                        >
-                          <div className="font-bold text-stone-900 leading-snug">
-                            <span>{item.menuName}</span>
-                            {item.toppings.length > 0 && (
-                              <span className="text-amber-700 font-extrabold ml-1.5">
-                                (+{item.toppings.map((t) => t.name).join(" +")})
-                              </span>
-                            )}
-                          </div>
-                          <span className="shrink-0 font-extrabold text-stone-900 tabular-nums bg-white px-2.5 py-0.5 rounded-lg border border-[#E9DFCE]">
-                            ×{item.quantity}
-                          </span>
-                        </li>
                       ))}
-                    </ul>
-
-                    {/* Notes (if any) */}
-                    {(order.noteTags.length > 0 || order.note) && (
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {order.noteTags.map((tag) => (
-                          <span
-                            key={tag}
-                            className="px-2.5 py-1 rounded-full bg-amber-200/80 text-stone-900 text-xs font-bold"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                        {order.note && (
-                          <span className="px-2.5 py-1 rounded-full bg-stone-100 text-stone-800 text-xs font-semibold">
-                            โน้ต: {order.note}
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Action Buttons */}
-                    <div className="flex items-center gap-2 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => onUpdateOrderStatus(order.id, "done")}
-                        className="flex-1 min-h-[48px] px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-base shadow-xs active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-                      >
-                        <Check className="w-5 h-5" />
-                        <span>ส่งของแล้ว</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => onUpdateOrderStatus(order.id, "void")}
-                        className="min-h-[48px] px-3.5 py-2.5 rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs active:scale-[0.97] transition-all flex items-center justify-center gap-1"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        <span>ยกเลิก</span>
-                      </button>
+                      {order.note && (
+                        <span className="text-xs text-stone-600 bg-stone-100 px-2.5 py-0.5 rounded-full">
+                          โน้ต: {order.note}
+                        </span>
+                      )}
                     </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => onUpdateOrderStatus(order.id, "done")}
+                      className="flex-1 min-h-[44px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>ส่งของแล้ว</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onUpdateOrderStatus(order.id, "void")}
+                      className="min-h-[44px] px-3.5 py-2 rounded-xl bg-stone-100 hover:bg-rose-50 text-stone-600 hover:text-rose-600 font-medium text-xs active:scale-[0.97] transition-all"
+                    >
+                      ยกเลิก
+                    </button>
                   </div>
                 </article>
               );
@@ -783,85 +714,79 @@ export function OrderTab({
       </section>
 
       {/* =================================================================== */}
-      {/* COLLAPSIBLE BOTTOM BAR: TODAY'S DONE / VOID HISTORY                 */}
+      {/* 3. COLLAPSIBLE TODAY HISTORY (RESTORE / VOID / PERMANENT DELETE)    */}
       {/* =================================================================== */}
       <section
         aria-label="ประวัติบิลวันนี้ที่เสร็จแล้ว"
-        className="rounded-2xl bg-white border border-[#E9DFCE] overflow-hidden"
+        className="rounded-2xl bg-white border border-stone-200/80 overflow-hidden"
       >
         <button
           type="button"
           onClick={() => setHistoryOpen((prev) => !prev)}
           aria-expanded={historyOpen}
-          className="w-full min-h-[48px] px-4 py-3 flex items-center justify-between text-left hover:bg-[#FAF5EB]/60 transition-colors"
+          className="w-full min-h-[48px] px-4 py-3 flex items-center justify-between text-left hover:bg-stone-50/70 transition-colors"
         >
           <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-stone-700">
+            <span className="text-sm font-medium text-stone-700">
               ประวัติบิลวันนี้ที่เสร็จแล้ว
             </span>
-            <span className="px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 text-xs font-bold tabular-nums">
+            <span className="px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 text-xs font-semibold tabular-nums">
               {todayHistoryOrders.length}
             </span>
           </div>
           {historyOpen ? (
-            <ChevronUp className="w-4 h-4 text-stone-500" />
+            <ChevronUp className="w-4 h-4 text-stone-400" />
           ) : (
-            <ChevronDown className="w-4 h-4 text-stone-500" />
+            <ChevronDown className="w-4 h-4 text-stone-400" />
           )}
         </button>
 
         {historyOpen && (
-          <div className="border-t border-[#EFE6D6] divide-y divide-[#EFE6D6]">
+          <div className="border-t border-stone-100 divide-y divide-stone-100">
             {todayHistoryOrders.length === 0 ? (
-              <div className="p-4 text-center text-xs text-stone-400">
+              <div className="p-5 text-center text-xs text-stone-400">
                 ยังไม่มีบิลที่เสร็จหรือยกเลิกในวันนี้
               </div>
             ) : (
               todayHistoryOrders.map((order) => {
                 const isDone = order.status === "done";
                 const isMake = order.paymentMethod === "make";
+                const confirmingDelete = confirmDeleteOrderId === order.id;
+
                 return (
                   <div
                     key={order.id}
-                    className={`p-3.5 space-y-2 ${
-                      !isDone ? "bg-rose-50/40" : ""
+                    className={`p-4 space-y-2.5 ${
+                      !isDone ? "bg-stone-50/60" : ""
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-center gap-2 min-w-0 flex-wrap">
                         <span
-                          className={`px-2 py-0.5 rounded-lg text-xs font-extrabold tabular-nums ${
+                          className={`px-2 py-0.5 rounded-lg text-xs font-bold tabular-nums ${
                             isDone
-                              ? "bg-emerald-100 text-emerald-800"
-                              : "bg-rose-100 text-rose-700 line-through"
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-stone-200/80 text-stone-500 line-through"
                           }`}
                         >
                           {formatQueueNumber(order.queueNumber)}
                         </span>
-                        <span className="text-xs text-stone-500 tabular-nums">
+                        <span className="text-xs text-stone-400 tabular-nums">
                           {formatThailandTime(order.createdAt)}
                         </span>
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                            isMake
-                              ? "bg-teal-50 text-teal-700"
-                              : "bg-orange-50 text-orange-700"
-                          }`}
-                        >
-                          {isMake ? "โอน" : "สด"}
+                        <span className="text-xs text-stone-500">
+                          {isMake ? "โอน MAKE" : "เงินสด"}
                         </span>
                         <span
-                          className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                            isDone
-                              ? "bg-emerald-50 text-emerald-700"
-                              : "bg-rose-100 text-rose-700"
+                          className={`text-xs font-medium ${
+                            isDone ? "text-emerald-700" : "text-rose-600"
                           }`}
                         >
-                          {isDone ? "เสร็จแล้ว" : "ยกเลิกแล้ว"}
+                          · {isDone ? "เสร็จแล้ว" : "ยกเลิกแล้ว"}
                         </span>
                       </div>
                       <span
-                        className={`text-sm font-extrabold tabular-nums ${
+                        className={`text-sm font-bold tabular-nums ${
                           isDone
                             ? "text-stone-900"
                             : "text-stone-400 line-through"
@@ -871,7 +796,7 @@ export function OrderTab({
                       </span>
                     </div>
 
-                    <div className="text-xs text-stone-700">
+                    <div className="text-xs text-stone-600 leading-relaxed">
                       {order.items
                         .map(
                           (i) =>
@@ -885,40 +810,72 @@ export function OrderTab({
                         )
                         .join(", ")}
                       {(order.noteTags.length > 0 || order.note) && (
-                        <span className="text-stone-500">
+                        <span className="text-stone-400">
                           {" "}
-                          — {[...order.noteTags, order.note]
+                          · {[...order.noteTags, order.note]
                             .filter(Boolean)
                             .join(", ")}
                         </span>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => onUpdateOrderStatus(order.id, "pending")}
-                        className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 text-xs font-bold flex items-center gap-1 active:scale-95"
+                        onClick={() => {
+                          setConfirmDeleteOrderId(null);
+                          onUpdateOrderStatus(order.id, "pending");
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200/70 text-stone-700 text-xs font-medium inline-flex items-center gap-1"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
-                        กู้คืนเข้าคิวรอทำ
+                        กู้คืนเข้าคิว
                       </button>
 
                       {isDone ? (
                         <button
                           type="button"
-                          onClick={() => onUpdateOrderStatus(order.id, "void")}
-                          className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-xs font-bold active:scale-95"
+                          onClick={() => {
+                            setConfirmDeleteOrderId(null);
+                            onUpdateOrderStatus(order.id, "void");
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-rose-50 text-stone-600 hover:text-rose-600 text-xs font-medium"
                         >
                           ยกเลิกบิล
                         </button>
                       ) : (
                         <button
                           type="button"
-                          onClick={() => onUpdateOrderStatus(order.id, "done")}
-                          className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 text-xs font-bold active:scale-95"
+                          onClick={() => {
+                            setConfirmDeleteOrderId(null);
+                            onUpdateOrderStatus(order.id, "done");
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-medium"
                         >
                           กู้คืนเป็นเสร็จแล้ว
+                        </button>
+                      )}
+
+                      {confirmingDelete ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfirmDeleteOrderId(null);
+                            onDeleteOrder(order.id);
+                          }}
+                          className="ml-auto px-3 py-1.5 rounded-xl bg-rose-600 text-white text-xs font-semibold inline-flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          ยืนยันลบถาวร
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteOrderId(order.id)}
+                          className="ml-auto px-2.5 py-1.5 rounded-xl text-stone-400 hover:text-rose-600 hover:bg-rose-50 text-xs font-medium inline-flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          ลบ
                         </button>
                       )}
                     </div>
