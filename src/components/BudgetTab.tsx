@@ -488,14 +488,15 @@ export function BudgetTab({
       : null;
 
   return (
-    <div className="space-y-5">
-      {/* =================================================================== */}
-      {/* 1. BUDGET CONTROL & BREAK-EVEN CARD (CLEAN, ZERO NESTED BOXES)      */}
-      {/* =================================================================== */}
-      <section
-        aria-label="คุมงบประมาณและจุดคุ้มทุน"
-        className="rounded-3xl bg-white border border-stone-200/80 shadow-[0_2px_14px_-4px_rgba(28,25,23,0.06)] p-5 space-y-5"
-      >
+    <>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start pb-6">
+        {/* ================================================================= */}
+        {/* 1. BUDGET CONTROL & BREAK-EVEN CARD                               */}
+        {/* ================================================================= */}
+        <section
+          aria-label="คุมงบประมาณและจุดคุ้มทุน"
+          className="rounded-3xl bg-white border border-[#EDE6D8] shadow-[0_2px_14px_-4px_rgba(120,74,12,0.06)] p-5 space-y-5"
+        >
         {/* Header & Editable Budget Cap */}
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-semibold text-stone-900">
@@ -650,7 +651,7 @@ export function BudgetTab({
       {/* =================================================================== */}
       <section
         aria-label="สรุปยอดขายปิดวัน"
-        className="rounded-3xl bg-white border border-stone-200/80 shadow-[0_2px_14px_-4px_rgba(28,25,23,0.06)] p-5 space-y-4"
+        className="rounded-3xl bg-white border border-[#EDE6D8] shadow-[0_2px_14px_-4px_rgba(120,74,12,0.06)] p-5 space-y-4"
       >
         <div className="flex items-center justify-between gap-2">
           <div>
@@ -677,7 +678,7 @@ export function BudgetTab({
             ) : (
               <>
                 <ClipboardCopy className="w-3.5 h-3.5" />
-                คัดลอกสรุปยอด
+                คัดลอกสรุปยอดส่งแชท
               </>
             )}
           </button>
@@ -963,12 +964,13 @@ export function BudgetTab({
       </section>
 
       {/* =================================================================== */}
-      {/* 4A. MENU & TOPPING PRICE SETTINGS (CLEAN COLLAPSIBLE)               */}
+      {/* 4. RIGHT ROW 2: MENU EDITOR + BACKUP & CLEAR TEST BILLS             */}
       {/* =================================================================== */}
-      <section
-        aria-label="ตั้งค่าเมนูและราคา"
-        className="rounded-2xl bg-white border border-stone-200/80 overflow-hidden"
-      >
+      <div className="space-y-4">
+        <section
+          aria-label="ตั้งค่าเมนูและราคา"
+          className="rounded-3xl bg-white border border-[#EDE6D8] overflow-hidden"
+        >
         <button
           type="button"
           onClick={() => setMenuEditorOpen((prev) => !prev)}
@@ -1195,8 +1197,10 @@ export function BudgetTab({
           </p>
         </div>
       </section>
+      </div>
+      </div>
 
       {confirmModal}
-    </div>
+    </>
   );
 }

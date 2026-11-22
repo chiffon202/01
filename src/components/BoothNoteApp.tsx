@@ -8,19 +8,19 @@ import React, {
   useSyncExternalStore,
 } from "react";
 import {
+  AlertCircle,
   CheckCircle2,
   ClipboardList,
   PieChart,
   WifiOff,
-  AlertCircle,
 } from "lucide-react";
 import {
   BoothSettings,
   NewOrderItemInput,
   OrderStatus,
   PaymentMethod,
+  formatBaht,
   formatQueueNumber,
-  formatThaiDateLabel,
   getExpensesSnapshot,
   getOrdersSnapshot,
   getServerExpensesSnapshot,
@@ -67,7 +67,7 @@ export function BoothNoteApp() {
       toastTimerRef.current = window.setTimeout(() => {
         setToast(null);
         toastTimerRef.current = null;
-      }, 2400);
+      }, 2200);
     },
     []
   );
@@ -102,13 +102,26 @@ export function BoothNoteApp() {
     getServerSettingsSnapshot
   );
 
+  const todayKey = hydrated ? getThailandDateKey() : "";
+
   const pendingCount = useMemo(
     () => orders.filter((o) => o.status === "pending").length,
     [orders]
   );
 
-  const todayKey = hydrated ? getThailandDateKey() : "";
-  const todayLabel = todayKey ? formatThaiDateLabel(todayKey) : "วันนี้";
+  const todaySummary = useMemo(() => {
+    if (!todayKey) return { cups: 0, revenue: 0 };
+    let cups = 0;
+    let revenue = 0;
+    for (const order of orders) {
+      if (order.dateKey !== todayKey || order.status === "void") continue;
+      revenue += order.totalAmount;
+      for (const item of order.items) {
+        cups += item.quantity;
+      }
+    }
+    return { cups, revenue };
+  }, [orders, todayKey]);
 
   const handleAddOrder = useCallback(
     (input: {
@@ -118,7 +131,7 @@ export function BoothNoteApp() {
       paymentMethod: PaymentMethod;
     }) => {
       const { order } = localStorageBoothAdapter.addOrder(input);
-      showToast(`บันทึกคิว ${formatQueueNumber(order.queueNumber)} แล้ว`);
+      showToast(`ส่งคิว ${formatQueueNumber(order.queueNumber)} แล้ว`);
       return order;
     },
     [showToast]
@@ -208,33 +221,89 @@ export function BoothNoteApp() {
   }, []);
 
   return (
-    <div className="min-h-dvh flex flex-col bg-[#F6F5F2]">
-      {/* Minimal Sticky Header */}
-      <header className="sticky top-0 z-30 bg-[#F6F5F2]/90 backdrop-blur-md border-b border-stone-200/70">
-        <div className="max-w-xl mx-auto px-4 h-14 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5">
-            <span className="w-8 h-8 rounded-xl bg-amber-500 text-white font-bold text-sm flex items-center justify-center shadow-2xs">
+    <div className="min-h-dvh flex flex-col bg-[#FBF8F1]">
+      {/* =================================================================== */}
+      {/* COMPACT TOP NAVIGATION BAR (LANDSCAPE-FIRST)                        */}
+      {/* =================================================================== */}
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-[#EDE6D8]">
+        <div className="max-w-7xl mx-auto px-3 sm:px-5 h-14 flex items-center justify-between gap-2">
+          {/* Left: Brand + Realtime Today Summary */}
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="w-8 h-8 rounded-xl bg-amber-400 text-stone-950 font-extrabold text-sm flex items-center justify-center shrink-0 shadow-2xs">
               B
             </span>
-            <div>
-              <h1 className="text-[15px] font-bold text-stone-900 leading-none">
-                {settings.boothName}
-              </h1>
-              <p className="text-[11px] text-stone-400 mt-0.5">{todayLabel}</p>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-sm sm:text-base font-bold text-stone-900 leading-none truncate">
+                  {settings.boothName}
+                </h1>
+                {!isOnline ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-semibold shrink-0">
+                    <WifiOff className="w-3 h-3" />
+                    ออฟไลน์
+                  </span>
+                ) : (
+                  <span
+                    title="พร้อมใช้งานออฟไลน์ 100%"
+                    className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"
+                  />
+                )}
+              </div>
+              <p className="text-[11px] sm:text-xs text-stone-500 font-medium tabular-nums truncate mt-0.5">
+                วันนี้:{" "}
+                <strong className="text-stone-800 font-semibold">
+                  {todaySummary.cups} แก้ว
+                </strong>{" "}
+                |{" "}
+                <strong className="text-amber-700 font-bold">
+                  ฿{formatBaht(todaySummary.revenue)}
+                </strong>
+              </p>
             </div>
           </div>
 
-          {!isOnline ? (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-100/90 text-amber-900 text-[11px] font-medium">
-              <WifiOff className="w-3 h-3" />
-              ออฟไลน์
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-stone-200/80 text-stone-500 text-[11px] font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              พร้อมออฟไลน์
-            </span>
-          )}
+          {/* Right: 2 Main Tab Switch Buttons */}
+          <nav aria-label="เมนูหลักด้านบน" className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleSwitchTab("order")}
+              aria-current={activeTab === "order" ? "page" : undefined}
+              className={`min-h-[40px] px-3 sm:px-4 py-1.5 rounded-xl flex items-center gap-1.5 text-xs sm:text-sm font-semibold transition-all active:scale-[0.98] ${
+                activeTab === "order"
+                  ? "bg-stone-900 text-amber-300 shadow-2xs"
+                  : "bg-stone-100 text-stone-600 hover:bg-stone-200/70"
+              }`}
+            >
+              <ClipboardList className="w-4 h-4 shrink-0" />
+              <span>จดออเดอร์</span>
+              {pendingCount > 0 && (
+                <span
+                  className={`min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold tabular-nums inline-flex items-center justify-center ${
+                    activeTab === "order"
+                      ? "bg-amber-400 text-stone-950"
+                      : "bg-orange-500 text-white"
+                  }`}
+                >
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleSwitchTab("budget")}
+              aria-current={activeTab === "budget" ? "page" : undefined}
+              className={`min-h-[40px] px-3 sm:px-4 py-1.5 rounded-xl flex items-center gap-1.5 text-xs sm:text-sm font-semibold transition-all active:scale-[0.98] ${
+                activeTab === "budget"
+                  ? "bg-stone-900 text-amber-300 shadow-2xs"
+                  : "bg-stone-100 text-stone-600 hover:bg-stone-200/70"
+              }`}
+            >
+              <PieChart className="w-4 h-4 shrink-0" />
+              <span className="hidden sm:inline">งบ &amp; สรุปยอด</span>
+              <span className="sm:hidden">งบ &amp; ยอด</span>
+            </button>
+          </nav>
         </div>
       </header>
 
@@ -263,11 +332,11 @@ export function BoothNoteApp() {
       )}
 
       {/* Main Content */}
-      <main className="flex-1 w-full max-w-xl mx-auto px-4 pt-4 pb-32">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-5 pt-3 pb-4">
         {!hydrated ? (
-          <div className="space-y-4 animate-pulse">
-            <div className="h-72 rounded-3xl bg-white border border-stone-200/70" />
-            <div className="h-32 rounded-2xl bg-white border border-stone-200/70" />
+          <div className="grid grid-cols-1 md:grid-cols-[65fr_35fr] gap-4 animate-pulse">
+            <div className="h-72 rounded-3xl bg-white border border-[#EDE6D8]" />
+            <div className="h-96 rounded-3xl bg-white border border-[#EDE6D8]" />
           </div>
         ) : activeTab === "order" ? (
           <OrderTab
@@ -295,61 +364,6 @@ export function BoothNoteApp() {
           />
         )}
       </main>
-
-      {/* Airy Fixed 2-Tab Bottom Navigation Bar */}
-      <nav
-        aria-label="เมนูหลักด้านล่าง"
-        className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200/80 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
-      >
-        <div className="max-w-xl mx-auto px-4 pt-2 pb-1 grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => handleSwitchTab("order")}
-            aria-current={activeTab === "order" ? "page" : undefined}
-            className={`min-h-[48px] rounded-2xl px-3 py-2 flex items-center justify-center gap-2 text-sm font-semibold transition-all active:scale-[0.98] ${
-              activeTab === "order"
-                ? "bg-amber-50 text-amber-900"
-                : "text-stone-500 hover:bg-stone-50"
-            }`}
-          >
-            <ClipboardList
-              className={`w-5 h-5 shrink-0 ${
-                activeTab === "order" ? "text-amber-600" : "text-stone-400"
-              }`}
-            />
-            <span>จดออเดอร์</span>
-            {pendingCount > 0 && (
-              <span
-                className={`min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold tabular-nums inline-flex items-center justify-center ${
-                  activeTab === "order"
-                    ? "bg-amber-500 text-white"
-                    : "bg-stone-200 text-stone-700"
-                }`}
-              >
-                {pendingCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleSwitchTab("budget")}
-            aria-current={activeTab === "budget" ? "page" : undefined}
-            className={`min-h-[48px] rounded-2xl px-3 py-2 flex items-center justify-center gap-2 text-sm font-semibold transition-all active:scale-[0.98] ${
-              activeTab === "budget"
-                ? "bg-amber-50 text-amber-900"
-                : "text-stone-500 hover:bg-stone-50"
-            }`}
-          >
-            <PieChart
-              className={`w-5 h-5 shrink-0 ${
-                activeTab === "budget" ? "text-amber-600" : "text-stone-400"
-              }`}
-            />
-            <span>งบ &amp; สรุปยอด</span>
-          </button>
-        </div>
-      </nav>
     </div>
   );
 }

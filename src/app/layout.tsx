@@ -48,7 +48,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: "#F6F5F2",
+  themeColor: "#FBF8F1",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -57,7 +57,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="th"
       className={`${notoSansThai.variable} ${plusJakarta.variable} h-full antialiased`}
     >
-      <body className="min-h-full bg-[#F6F5F2] text-[#1C1917] flex flex-col">
+      <body className="min-h-full bg-[#FBF8F1] text-[#1C1917] flex flex-col">
         <ServiceWorkerRegister />
         {children}
       </body>

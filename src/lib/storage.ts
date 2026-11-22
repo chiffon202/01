@@ -35,6 +35,8 @@ export interface OrderItem {
   menuName: string;
   unitPrice: number;
   toppings: OrderTopping[];
+  noteTags?: string[]; // Per-cup quick note tags (e.g. ['หวานน้อย', 'ไม่ใส่เนย'])
+  note?: string;
   quantity: number;
   lineTotal: number;
 }
@@ -84,6 +86,8 @@ export interface NewOrderItemInput {
   menuName: string;
   unitPrice: number;
   toppings: OrderTopping[];
+  noteTags?: string[];
+  note?: string;
   quantity: number;
 }
 
@@ -322,6 +326,89 @@ export function subscribeStorageChange(callback: () => void): () => void {
 // Orders CRUD
 // ----------------------------------------------------------------------------
 
+function normalizeOrderItem(raw: Partial<OrderItem>): OrderItem {
+  const toppings: OrderTopping[] = Array.isArray(raw.toppings)
+    ? raw.toppings.map((t, idx) => ({
+        id: typeof t?.id === "string" ? t.id : `top_${idx}`,
+        name: typeof t?.name === "string" ? t.name : "ท็อปปิ้ง",
+        price: typeof t?.price === "number" && !Number.isNaN(t.price) ? t.price : 0,
+      }))
+    : [];
+  const unitPrice =
+    typeof raw.unitPrice === "number" && !Number.isNaN(raw.unitPrice)
+      ? raw.unitPrice
+      : 25;
+  const quantity =
+    typeof raw.quantity === "number" && raw.quantity > 0
+      ? Math.round(raw.quantity)
+      : 1;
+  const toppingsSum = toppings.reduce((s, t) => s + t.price, 0);
+  const lineTotal =
+    typeof raw.lineTotal === "number" && !Number.isNaN(raw.lineTotal)
+      ? raw.lineTotal
+      : (unitPrice + toppingsSum) * quantity;
+
+  return {
+    id: typeof raw.id === "string" ? raw.id : generateId("item"),
+    menuId: typeof raw.menuId === "string" ? raw.menuId : "corn-butter",
+    menuName:
+      typeof raw.menuName === "string" && raw.menuName
+        ? raw.menuName
+        : "ข้าวโพดคลุกเนย",
+    unitPrice,
+    toppings,
+    noteTags: Array.isArray(raw.noteTags)
+      ? raw.noteTags.filter((x): x is string => typeof x === "string")
+      : [],
+    note: typeof raw.note === "string" ? raw.note : undefined,
+    quantity,
+    lineTotal,
+  };
+}
+
+function normalizeOrders(rawList: unknown): Order[] {
+  if (!Array.isArray(rawList)) return [];
+  const result: Order[] = [];
+  for (const raw of rawList) {
+    if (!raw || typeof raw !== "object") continue;
+    const o = raw as Partial<Order>;
+    const items = Array.isArray(o.items)
+      ? o.items.map((item) => normalizeOrderItem(item ?? {}))
+      : [];
+    const totalAmount =
+      typeof o.totalAmount === "number" && !Number.isNaN(o.totalAmount)
+        ? o.totalAmount
+        : items.reduce((s, i) => s + i.lineTotal, 0);
+    const createdAt =
+      typeof o.createdAt === "string" ? o.createdAt : new Date().toISOString();
+    result.push({
+      id: typeof o.id === "string" ? o.id : generateId("ord"),
+      queueNumber:
+        typeof o.queueNumber === "number" && o.queueNumber > 0
+          ? o.queueNumber
+          : 1,
+      dateKey:
+        typeof o.dateKey === "string" && o.dateKey
+          ? o.dateKey
+          : getThailandDateKey(createdAt),
+      items,
+      noteTags: Array.isArray(o.noteTags)
+        ? o.noteTags.filter((x): x is string => typeof x === "string")
+        : [],
+      note: typeof o.note === "string" ? o.note : "",
+      paymentMethod: o.paymentMethod === "cash" ? "cash" : "make",
+      totalAmount,
+      status:
+        o.status === "done" || o.status === "void" ? o.status : "pending",
+      createdAt,
+      updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : createdAt,
+      completedAt:
+        typeof o.completedAt === "string" ? o.completedAt : undefined,
+    });
+  }
+  return result;
+}
+
 export function getOrders(): Order[] {
   if (!isBrowser()) return [];
   const raw = window.localStorage.getItem(STORAGE_KEYS.ORDERS);
@@ -329,8 +416,8 @@ export function getOrders(): Order[] {
     window.localStorage.setItem(STORAGE_KEYS.ORDERS, "[]");
     return [];
   }
-  const parsed = safeParseJson<Order[]>(raw, []);
-  return Array.isArray(parsed) ? parsed : [];
+  const parsed = safeParseJson<unknown>(raw, []);
+  return normalizeOrders(parsed);
 }
 
 export function saveOrders(orders: Order[]): void {
@@ -375,6 +462,8 @@ export function addOrder(input: NewOrderInput): {
       menuName: item.menuName,
       unitPrice: item.unitPrice,
       toppings: item.toppings,
+      noteTags: item.noteTags ?? [],
+      note: item.note?.trim() || undefined,
       quantity: qty,
       lineTotal: lineUnit * qty,
     };
@@ -440,6 +529,32 @@ export function clearOrdersOnly(): Order[] {
 // Expenses CRUD
 // ----------------------------------------------------------------------------
 
+function normalizeExpenses(rawList: unknown): Expense[] {
+  if (!Array.isArray(rawList)) return [];
+  const result: Expense[] = [];
+  for (const raw of rawList) {
+    if (!raw || typeof raw !== "object") continue;
+    const e = raw as Partial<Expense>;
+    const createdAt =
+      typeof e.createdAt === "string" ? e.createdAt : new Date().toISOString();
+    result.push({
+      id: typeof e.id === "string" ? e.id : generateId("exp"),
+      title: typeof e.title === "string" ? e.title : "รายจ่าย",
+      amount:
+        typeof e.amount === "number" && !Number.isNaN(e.amount)
+          ? e.amount
+          : 0,
+      dateKey:
+        typeof e.dateKey === "string" && e.dateKey
+          ? e.dateKey
+          : getThailandDateKey(createdAt),
+      createdAt,
+      updatedAt: typeof e.updatedAt === "string" ? e.updatedAt : createdAt,
+    });
+  }
+  return result;
+}
+
 export function getExpenses(): Expense[] {
   if (!isBrowser()) return [];
   const raw = window.localStorage.getItem(STORAGE_KEYS.EXPENSES);
@@ -448,8 +563,8 @@ export function getExpenses(): Expense[] {
     window.localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(seeded));
     return seeded;
   }
-  const parsed = safeParseJson<Expense[]>(raw, []);
-  return Array.isArray(parsed) ? parsed : [];
+  const parsed = safeParseJson<unknown>(raw, []);
+  return normalizeExpenses(parsed);
 }
 
 export function saveExpenses(expenses: Expense[]): void {
@@ -591,9 +706,12 @@ export function importAllData(rawJson: string): BoothDataSnapshot {
         : defaults.quickNotes,
   };
 
+  const normalizedOrders = normalizeOrders(parsed.orders);
+  const normalizedExpenses = normalizeExpenses(parsed.expenses);
+
   if (isBrowser()) {
-    const ordersStr = JSON.stringify(parsed.orders);
-    const expensesStr = JSON.stringify(parsed.expenses);
+    const ordersStr = JSON.stringify(normalizedOrders);
+    const expensesStr = JSON.stringify(normalizedExpenses);
     const settingsStr = JSON.stringify(mergedSettings);
 
     window.localStorage.setItem(STORAGE_KEYS.ORDERS, ordersStr);
@@ -601,9 +719,9 @@ export function importAllData(rawJson: string): BoothDataSnapshot {
     window.localStorage.setItem(STORAGE_KEYS.SETTINGS, settingsStr);
 
     cachedOrdersRaw = ordersStr;
-    cachedOrdersValue = parsed.orders;
+    cachedOrdersValue = normalizedOrders;
     cachedExpensesRaw = expensesStr;
-    cachedExpensesValue = parsed.expenses;
+    cachedExpensesValue = normalizedExpenses;
     cachedSettingsRaw = settingsStr;
     cachedSettingsValue = mergedSettings;
 
@@ -613,8 +731,8 @@ export function importAllData(rawJson: string): BoothDataSnapshot {
   return {
     version: 1,
     exportedAt: parsed.exportedAt || new Date().toISOString(),
-    orders: parsed.orders,
-    expenses: parsed.expenses,
+    orders: normalizedOrders,
+    expenses: normalizedExpenses,
     settings: mergedSettings,
   };
 }
