@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+:root {
+  --background: #fffbf2;
+  --foreground: #1c1917;
+  --surface: #ffffff;
+  --surface-muted: #f7efe0;
+  --border-warm: #e9dfce;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-jakarta), var(--font-thai), system-ui, -apple-system, sans-serif;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-jakarta), var(--font-thai), system-ui, -apple-system, sans-serif;
+  overscroll-behavior-y: contain;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
