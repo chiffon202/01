@@ -99,14 +99,19 @@ export function BudgetTab({
     [expenses]
   );
 
-  const nonVoidOrdersAll = useMemo(
-    () => orders.filter((o) => o.status !== "void"),
+  const soldOrdersAll = useMemo(
+    () => orders.filter((o) => o.status !== "void" && o.status !== "waste"),
+    [orders]
+  );
+
+  const wasteOrdersAll = useMemo(
+    () => orders.filter((o) => o.status === "waste"),
     [orders]
   );
 
   const totalRevenueAll = useMemo(
-    () => nonVoidOrdersAll.reduce((sum, o) => sum + o.totalAmount, 0),
-    [nonVoidOrdersAll]
+    () => soldOrdersAll.reduce((sum, o) => sum + o.totalAmount, 0),
+    [soldOrdersAll]
   );
 
   const budgetLimit = settings.budgetLimit;
@@ -137,11 +142,17 @@ export function BudgetTab({
     return Array.from(set).sort((a, b) => b.localeCompare(a));
   }, [orders]);
 
-  const filteredOrders = useMemo(() => {
-    if (salesFilter === "all") return nonVoidOrdersAll;
+  const filteredSoldOrders = useMemo(() => {
+    if (salesFilter === "all") return soldOrdersAll;
     const targetDate = salesFilter === "today" ? todayKey : salesFilter;
-    return nonVoidOrdersAll.filter((o) => o.dateKey === targetDate);
-  }, [nonVoidOrdersAll, salesFilter, todayKey]);
+    return soldOrdersAll.filter((o) => o.dateKey === targetDate);
+  }, [soldOrdersAll, salesFilter, todayKey]);
+
+  const filteredWasteOrders = useMemo(() => {
+    if (salesFilter === "all") return wasteOrdersAll;
+    const targetDate = salesFilter === "today" ? todayKey : salesFilter;
+    return wasteOrdersAll.filter((o) => o.dateKey === targetDate);
+  }, [wasteOrdersAll, salesFilter, todayKey]);
 
   const salesStats = useMemo(() => {
     let makeTotal = 0;
@@ -156,7 +167,7 @@ export function BudgetTab({
       toppingCounts.set(t.name, 0);
     }
 
-    for (const order of filteredOrders) {
+    for (const order of filteredSoldOrders) {
       if (order.paymentMethod === "make") {
         makeTotal += order.totalAmount;
         makeCount += 1;
@@ -182,7 +193,7 @@ export function BudgetTab({
 
     return {
       totalRevenue: makeTotal + cashTotal,
-      totalBills: filteredOrders.length,
+      totalBills: filteredSoldOrders.length,
       makeTotal,
       makeCount,
       cashTotal,
@@ -191,7 +202,37 @@ export function BudgetTab({
       menuEntries: Array.from(menuCounts.entries()),
       toppingEntries: Array.from(toppingCounts.entries()),
     };
-  }, [filteredOrders, settings.toppings]);
+  }, [filteredSoldOrders, settings.toppings]);
+
+  const wasteStats = useMemo(() => {
+    let wasteCups = 0;
+    const wasteToppingCounts = new Map<string, number>();
+
+    for (const order of filteredWasteOrders) {
+      for (const item of order.items) {
+        wasteCups += item.quantity;
+        for (const top of item.toppings) {
+          wasteToppingCounts.set(
+            top.name,
+            (wasteToppingCounts.get(top.name) ?? 0) + item.quantity
+          );
+        }
+      }
+    }
+
+    const totalCupsUsed = salesStats.totalCups + wasteCups;
+    const yieldPct =
+      totalCupsUsed > 0
+        ? ((salesStats.totalCups / totalCupsUsed) * 100).toFixed(1)
+        : "0.0";
+
+    return {
+      wasteCups,
+      totalCupsUsed,
+      yieldPct,
+      wasteToppingEntries: Array.from(wasteToppingCounts.entries()),
+    };
+  }, [filteredWasteOrders, salesStats.totalCups]);
 
   const filterDisplayLabel = useMemo(() => {
     if (salesFilter === "all") return "รวมทั้งหมด";
@@ -234,6 +275,7 @@ export function BudgetTab({
       menuLines,
       `🧀 ท็อปปิ้งที่ออกไป:`,
       toppingLines,
+      `⚠️ ทำเสีย (Waste): ${wasteStats.wasteCups} แก้ว | ค่า Yield: ${wasteStats.yieldPct}%`,
       `━━━━━━━━━━━━━━`,
       `🧾 รายจ่ายสะสมทั้งหมด: ${formatBaht(totalExpenses)} / งบ ${formatBaht(budgetLimit)} บาท`,
       `📈 ภาพรวมจุดคุ้มทุน: ${breakEvenLine}`,
@@ -826,6 +868,52 @@ export function BudgetTab({
                     </li>
                   ))}
                 </ul>
+              )}
+            </div>
+          </div>
+
+          {/* Cup Stock & Yield Section */}
+          <div className="pt-3 border-t border-stone-100 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-stone-700">
+                สต็อกแก้ว &amp; ค่า Yield
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200/80 text-amber-900 text-xs font-bold tabular-nums">
+                Yield {wasteStats.yieldPct}%
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl bg-stone-50 border border-stone-200/70 py-2 px-2">
+                <div className="text-[11px] text-stone-500">ขายได้</div>
+                <div className="text-sm font-bold text-stone-900 tabular-nums mt-0.5">
+                  {salesStats.totalCups} ใบ
+                </div>
+              </div>
+              <div className="rounded-xl bg-rose-50/70 border border-rose-200/70 py-2 px-2">
+                <div className="text-[11px] text-rose-700">ทำเสีย (Waste)</div>
+                <div className="text-sm font-bold text-rose-700 tabular-nums mt-0.5">
+                  {wasteStats.wasteCups} ใบ
+                </div>
+              </div>
+              <div className="rounded-xl bg-amber-50/70 border border-amber-200/70 py-2 px-2">
+                <div className="text-[11px] text-amber-900">ใช้แก้วรวม</div>
+                <div className="text-sm font-bold text-amber-950 tabular-nums mt-0.5">
+                  {wasteStats.totalCupsUsed} ใบ
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 text-xs text-stone-500">
+              <span>ท็อปปิ้งที่เสียไป:</span>
+              {wasteStats.wasteToppingEntries.length === 0 ? (
+                <span className="text-stone-400">ไม่มีท็อปปิ้งเสีย</span>
+              ) : (
+                <span className="font-semibold text-rose-700 tabular-nums text-right">
+                  {wasteStats.wasteToppingEntries
+                    .map(([name, qty]) => `+${name} ${qty} ที่`)
+                    .join(" · ")}
+                </span>
               )}
             </div>
           </div>

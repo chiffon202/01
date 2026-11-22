@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
+  AlertTriangle,
   Banknote,
   Check,
   ChevronDown,
@@ -40,6 +42,10 @@ interface OrderTabProps {
     note: string;
     paymentMethod: PaymentMethod;
   }) => Order;
+  onAddWasteOrder: (input: {
+    items: NewOrderItemInput[];
+    reason: string;
+  }) => Order;
   onUpdateOrderStatus: (orderId: string, status: OrderStatus) => void;
   onDeleteOrder: (orderId: string) => void;
 }
@@ -67,11 +73,14 @@ function getCupTotal(cup: DraftCup): number {
   return cup.unitPrice + toppingSum;
 }
 
+const WASTE_REASONS = ["ทำหล่น/เละ", "ชิม/แจก", "วัตถุดิบเสีย/อื่นๆ"] as const;
+
 export function OrderTab({
   orders,
   settings,
   todayKey,
   onAddOrder,
+  onAddWasteOrder,
   onUpdateOrderStatus,
   onDeleteOrder,
 }: OrderTabProps) {
@@ -126,6 +135,8 @@ export function OrderTab({
   const [confirmDeleteOrderId, setConfirmDeleteOrderId] = useState<
     string | null
   >(null);
+  const [wasteModalOpen, setWasteModalOpen] = useState<boolean>(false);
+  const [wasteReason, setWasteReason] = useState<string>(WASTE_REASONS[0]);
 
   const activeCup = useMemo(() => {
     if (draftCups.length === 0) return null;
@@ -152,12 +163,13 @@ export function OrderTab({
       );
   }, [orders]);
 
-  // Today's completed or voided orders: newest first
+  // Today's completed, voided, or waste records: newest first
   const todayHistoryOrders = useMemo(() => {
     return orders
       .filter(
         (o) =>
-          o.dateKey === todayKey && (o.status === "done" || o.status === "void")
+          o.dateKey === todayKey &&
+          (o.status === "done" || o.status === "void" || o.status === "waste")
       )
       .sort(
         (a, b) =>
@@ -499,28 +511,30 @@ export function OrderTab({
             )}
           </div>
 
-          {/* Thin Divider + Row 3: 3 Capsule Note Buttons */}
+          {/* Thin Divider + Row 3: 2 Full-Width Capsule Note Buttons */}
           <div className="border-t border-stone-200/70 pt-3.5">
-            <div className="grid grid-cols-3 gap-2">
-              {settings.quickNotes.map((tag) => {
-                const active = Boolean(activeCup?.noteTags.includes(tag));
-                return (
-                  <button
-                    key={tag}
-                    type="button"
-                    onClick={() => handleToggleNoteTag(tag)}
-                    aria-pressed={active}
-                    className={`min-h-[44px] px-3 py-2 rounded-full text-xs sm:text-sm font-semibold border transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
-                      active
-                        ? "bg-stone-800 border-stone-800 text-amber-200 shadow-2xs"
-                        : "bg-stone-50 border-stone-200/80 text-stone-700 hover:bg-stone-100"
-                    }`}
-                  >
-                    {active && <Check className="w-3.5 h-3.5 shrink-0" />}
-                    <span className="truncate">{tag}</span>
-                  </button>
-                );
-              })}
+            <div className="grid grid-cols-2 gap-2.5">
+              {settings.quickNotes
+                .filter((tag) => tag !== "แยกท็อปปิ้ง")
+                .map((tag) => {
+                  const active = Boolean(activeCup?.noteTags.includes(tag));
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => handleToggleNoteTag(tag)}
+                      aria-pressed={active}
+                      className={`min-h-[46px] px-4 py-2 rounded-full text-sm font-semibold border transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
+                        active
+                          ? "bg-stone-800 border-stone-800 text-amber-200 shadow-2xs"
+                          : "bg-stone-50 border-stone-200/80 text-stone-700 hover:bg-stone-100"
+                      }`}
+                    >
+                      {active && <Check className="w-4 h-4 shrink-0" />}
+                      <span className="truncate">{tag}</span>
+                    </button>
+                  );
+                })}
             </div>
           </div>
         </section>
@@ -722,6 +736,7 @@ export function OrderTab({
                 ) : (
                   todayHistoryOrders.map((order) => {
                     const isDone = order.status === "done";
+                    const isWaste = order.status === "waste";
                     const isMake = order.paymentMethod === "make";
                     const confirmingDelete = confirmDeleteOrderId === order.id;
 
@@ -729,37 +744,55 @@ export function OrderTab({
                       <div
                         key={order.id}
                         className={`p-3.5 space-y-2 ${
-                          !isDone ? "bg-stone-50/70" : ""
+                          isWaste
+                            ? "bg-rose-50/35"
+                            : !isDone
+                            ? "bg-stone-50/70"
+                            : ""
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0 flex-wrap">
                             <span
                               className={`px-2 py-0.5 rounded-lg text-xs font-bold tabular-nums ${
-                                isDone
+                                isWaste
+                                  ? "bg-rose-100 text-rose-700"
+                                  : isDone
                                   ? "bg-emerald-50 text-emerald-700"
                                   : "bg-stone-200/80 text-stone-500 line-through"
                               }`}
                             >
-                              {formatQueueNumber(order.queueNumber)}
+                              {isWaste
+                                ? "ทำเสีย"
+                                : formatQueueNumber(order.queueNumber)}
                             </span>
                             <span className="text-xs text-stone-400 tabular-nums">
                               {formatThailandTime(order.createdAt)}
                             </span>
-                            <span className="text-xs text-stone-500">
-                              {isMake ? "โอน MAKE" : "เงินสด"}
-                            </span>
-                            <span
-                              className={`text-xs font-medium ${
-                                isDone ? "text-emerald-700" : "text-rose-600"
-                              }`}
-                            >
-                              · {isDone ? "เสร็จแล้ว" : "ยกเลิกแล้ว"}
-                            </span>
+                            {isWaste ? (
+                              <span className="text-xs font-medium text-rose-700">
+                                · {order.note || "ทำเสีย (Waste)"}
+                              </span>
+                            ) : (
+                              <>
+                                <span className="text-xs text-stone-500">
+                                  {isMake ? "โอน MAKE" : "เงินสด"}
+                                </span>
+                                <span
+                                  className={`text-xs font-medium ${
+                                    isDone ? "text-emerald-700" : "text-rose-600"
+                                  }`}
+                                >
+                                  · {isDone ? "เสร็จแล้ว" : "ยกเลิกแล้ว"}
+                                </span>
+                              </>
+                            )}
                           </div>
                           <span
                             className={`text-sm font-bold tabular-nums ${
-                              isDone
+                              isWaste
+                                ? "text-stone-500"
+                                : isDone
                                 ? "text-stone-900"
                                 : "text-stone-400 line-through"
                             }`}
@@ -789,40 +822,44 @@ export function OrderTab({
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setConfirmDeleteOrderId(null);
-                              onUpdateOrderStatus(order.id, "pending");
-                            }}
-                            className="px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200/70 text-stone-700 text-xs font-medium inline-flex items-center gap-1"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            กู้คืนเข้าคิว
-                          </button>
+                          {!isWaste && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setConfirmDeleteOrderId(null);
+                                  onUpdateOrderStatus(order.id, "pending");
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200/70 text-stone-700 text-xs font-medium inline-flex items-center gap-1"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                กู้คืนเข้าคิว
+                              </button>
 
-                          {isDone ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setConfirmDeleteOrderId(null);
-                                onUpdateOrderStatus(order.id, "void");
-                              }}
-                              className="px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-rose-50 text-stone-600 hover:text-rose-600 text-xs font-medium"
-                            >
-                              ยกเลิกบิล
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setConfirmDeleteOrderId(null);
-                                onUpdateOrderStatus(order.id, "done");
-                              }}
-                              className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-medium"
-                            >
-                              กู้คืนเป็นเสร็จแล้ว
-                            </button>
+                              {isDone ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setConfirmDeleteOrderId(null);
+                                    onUpdateOrderStatus(order.id, "void");
+                                  }}
+                                  className="px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-rose-50 text-stone-600 hover:text-rose-600 text-xs font-medium"
+                                >
+                                  ยกเลิกบิล
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setConfirmDeleteOrderId(null);
+                                    onUpdateOrderStatus(order.id, "done");
+                                  }}
+                                  className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-medium"
+                                >
+                                  กู้คืนเป็นเสร็จแล้ว
+                                </button>
+                              )}
+                            </>
                           )}
 
                           {confirmingDelete ? (
@@ -1040,13 +1077,126 @@ export function OrderTab({
             type="button"
             onClick={handleSaveOrder}
             disabled={draftCups.length === 0}
-            className="w-full min-h-[54px] px-5 py-3 rounded-2xl bg-stone-900 hover:bg-stone-800 disabled:bg-stone-200 disabled:text-stone-400 text-amber-300 font-bold text-base shadow-sm active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            className="w-full min-h-[52px] px-5 py-3 rounded-2xl bg-stone-900 hover:bg-stone-800 disabled:bg-stone-200 disabled:text-stone-400 text-amber-300 font-bold text-base shadow-sm active:scale-[0.98] transition-all flex items-center justify-center gap-2"
           >
             <Check className="w-5 h-5" />
             <span>บันทึก &amp; ส่งคิว</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setWasteReason(WASTE_REASONS[0]);
+              setWasteModalOpen(true);
+            }}
+            disabled={draftCups.length === 0}
+            className="w-full min-h-[38px] px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-rose-50 border border-stone-200/80 hover:border-rose-200 disabled:opacity-40 disabled:pointer-events-none text-stone-600 hover:text-rose-700 font-medium text-xs transition-colors active:scale-[0.99]"
+          >
+            บันทึกทำเสีย (0.-)
+          </button>
         </div>
       </aside>
+
+      {wasteModalOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="waste-modal-title"
+            onClick={() => setWasteModalOpen(false)}
+            className="fixed inset-0 z-[100] bg-stone-950/45 flex items-center justify-center p-4"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm rounded-3xl bg-white border border-stone-200 shadow-2xl p-5 space-y-4"
+            >
+              <div className="flex items-start gap-3">
+                <span className="w-10 h-10 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </span>
+                <div className="space-y-1">
+                  <h3
+                    id="waste-modal-title"
+                    className="text-base font-semibold text-stone-900"
+                  >
+                    บันทึกทำเสีย (Waste) · 0.-
+                  </h3>
+                  <p className="text-xs text-stone-500 leading-relaxed">
+                    บันทึก{" "}
+                    <strong className="text-stone-800">
+                      {draftCups.length} แก้ว
+                    </strong>{" "}
+                    เพื่อตัดสต็อกแก้ว/ท็อปปิ้งและคำนวณ Yield (ไม่คิดเป็นรายรับและไม่รันคิวลูกค้า)
+                  </p>
+                </div>
+              </div>
+
+              {/* Reason Pills */}
+              <div className="space-y-1.5">
+                <div className="text-xs font-medium text-stone-500">
+                  เลือกเหตุผล
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {WASTE_REASONS.map((reason) => {
+                    const selected = wasteReason === reason;
+                    return (
+                      <button
+                        key={reason}
+                        type="button"
+                        onClick={() => setWasteReason(reason)}
+                        className={`min-h-[38px] px-2 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                          selected
+                            ? "bg-rose-600 border-rose-600 text-white"
+                            : "bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100"
+                        }`}
+                      >
+                        {reason}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setWasteModalOpen(false)}
+                  className="min-h-[44px] rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-semibold active:scale-[0.98]"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const itemsToWaste: NewOrderItemInput[] = draftCups.map(
+                      (cup) => ({
+                        menuId: cup.menuId,
+                        menuName: cup.menuName,
+                        unitPrice: cup.unitPrice,
+                        toppings: cup.toppings,
+                        noteTags: cup.noteTags,
+                        quantity: 1,
+                      })
+                    );
+                    onAddWasteOrder({
+                      items: itemsToWaste,
+                      reason: wasteReason,
+                    });
+                    setDraftCups([]);
+                    setActiveCupId(null);
+                    setPaymentMethod("make");
+                    setWasteModalOpen(false);
+                  }}
+                  className="min-h-[44px] rounded-2xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold active:scale-[0.98]"
+                >
+                  ยืนยันทำเสีย (0.-)
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

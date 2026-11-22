@@ -7,7 +7,7 @@
 // ============================================================================
 
 export type PaymentMethod = "make" | "cash";
-export type OrderStatus = "pending" | "done" | "void";
+export type OrderStatus = "pending" | "done" | "void" | "waste";
 
 export interface MenuItem {
   id: string;
@@ -108,6 +108,10 @@ export interface BoothStorageAdapter {
   getOrders: () => Order[];
   saveOrders: (orders: Order[]) => void;
   addOrder: (input: NewOrderInput) => { order: Order; orders: Order[] };
+  addWasteOrder: (input: {
+    items: NewOrderItemInput[];
+    reason: string;
+  }) => { order: Order; orders: Order[] };
   updateOrderStatus: (orderId: string, status: OrderStatus) => Order[];
   deleteOrder: (orderId: string) => Order[];
   clearOrdersOnly: () => Order[];
@@ -233,7 +237,7 @@ export function createDefaultSettings(): BoothSettings {
         active: true,
       },
     ],
-    quickNotes: ["หวานน้อย", "ไม่ใส่เนย", "แยกท็อปปิ้ง"],
+    quickNotes: ["หวานน้อย", "ไม่ใส่เนย"],
   };
 }
 
@@ -375,8 +379,14 @@ function normalizeOrders(rawList: unknown): Order[] {
     const items = Array.isArray(o.items)
       ? o.items.map((item) => normalizeOrderItem(item ?? {}))
       : [];
+    const status: OrderStatus =
+      o.status === "done" || o.status === "void" || o.status === "waste"
+        ? o.status
+        : "pending";
     const totalAmount =
-      typeof o.totalAmount === "number" && !Number.isNaN(o.totalAmount)
+      status === "waste"
+        ? 0
+        : typeof o.totalAmount === "number" && !Number.isNaN(o.totalAmount)
         ? o.totalAmount
         : items.reduce((s, i) => s + i.lineTotal, 0);
     const createdAt =
@@ -384,7 +394,9 @@ function normalizeOrders(rawList: unknown): Order[] {
     result.push({
       id: typeof o.id === "string" ? o.id : generateId("ord"),
       queueNumber:
-        typeof o.queueNumber === "number" && o.queueNumber > 0
+        status === "waste"
+          ? 0
+          : typeof o.queueNumber === "number" && o.queueNumber > 0
           ? o.queueNumber
           : 1,
       dateKey:
@@ -398,8 +410,7 @@ function normalizeOrders(rawList: unknown): Order[] {
       note: typeof o.note === "string" ? o.note : "",
       paymentMethod: o.paymentMethod === "cash" ? "cash" : "make",
       totalAmount,
-      status:
-        o.status === "done" || o.status === "void" ? o.status : "pending",
+      status,
       createdAt,
       updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : createdAt,
       completedAt:
@@ -435,7 +446,11 @@ export function getNextQueueNumberForDate(
 ): number {
   let maxQueue = 0;
   for (const order of orders) {
-    if (order.dateKey === dateKey && order.queueNumber > maxQueue) {
+    if (
+      order.status !== "waste" &&
+      order.dateKey === dateKey &&
+      order.queueNumber > maxQueue
+    ) {
       maxQueue = order.queueNumber;
     }
   }
@@ -488,6 +503,52 @@ export function addOrder(input: NewOrderInput): {
   const nextOrders = [...existing, newOrder];
   saveOrders(nextOrders);
   return { order: newOrder, orders: nextOrders };
+}
+
+export function addWasteOrder(input: {
+  items: NewOrderItemInput[];
+  reason: string;
+}): {
+  order: Order;
+  orders: Order[];
+} {
+  const existing = getOrders();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const dateKey = getThailandDateKey(now);
+
+  const items: OrderItem[] = input.items.map((item) => {
+    const qty = Math.max(1, Math.round(item.quantity));
+    return {
+      id: generateId("item"),
+      menuId: item.menuId,
+      menuName: item.menuName,
+      unitPrice: item.unitPrice,
+      toppings: item.toppings,
+      noteTags: item.noteTags ?? [],
+      note: item.note?.trim() || undefined,
+      quantity: qty,
+      lineTotal: 0,
+    };
+  });
+
+  const wasteOrder: Order = {
+    id: generateId("waste"),
+    queueNumber: 0,
+    dateKey,
+    items,
+    noteTags: [],
+    note: input.reason.trim() || "ทำเสีย",
+    paymentMethod: "cash",
+    totalAmount: 0,
+    status: "waste",
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+
+  const nextOrders = [...existing, wasteOrder];
+  saveOrders(nextOrders);
+  return { order: wasteOrder, orders: nextOrders };
 }
 
 export function updateOrderStatus(
@@ -631,6 +692,11 @@ export function getSettings(): BoothSettings {
     return defaults;
   }
   const parsed = safeParseJson<Partial<BoothSettings>>(raw, defaults);
+  const filteredNotes = Array.isArray(parsed.quickNotes)
+    ? parsed.quickNotes.filter(
+        (n): n is string => typeof n === "string" && n !== "แยกท็อปปิ้ง"
+      )
+    : [];
   return {
     boothName:
       typeof parsed.boothName === "string" && parsed.boothName.trim()
@@ -647,10 +713,7 @@ export function getSettings(): BoothSettings {
     toppings: Array.isArray(parsed.toppings)
       ? parsed.toppings
       : defaults.toppings,
-    quickNotes:
-      Array.isArray(parsed.quickNotes) && parsed.quickNotes.length > 0
-        ? parsed.quickNotes
-        : defaults.quickNotes,
+    quickNotes: filteredNotes.length > 0 ? filteredNotes : defaults.quickNotes,
   };
 }
 
@@ -686,6 +749,11 @@ export function importAllData(rawJson: string): BoothDataSnapshot {
     throw new Error("ไม่พบข้อมูล orders หรือ expenses ในไฟล์นี้");
   }
   const defaults = createDefaultSettings();
+  const importedNotes = Array.isArray(parsed.settings?.quickNotes)
+    ? parsed.settings.quickNotes.filter(
+        (n): n is string => typeof n === "string" && n !== "แยกท็อปปิ้ง"
+      )
+    : [];
   const mergedSettings: BoothSettings = {
     boothName: parsed.settings?.boothName || defaults.boothName,
     budgetLimit:
@@ -699,11 +767,7 @@ export function importAllData(rawJson: string): BoothDataSnapshot {
     toppings: Array.isArray(parsed.settings?.toppings)
       ? parsed.settings.toppings
       : defaults.toppings,
-    quickNotes:
-      Array.isArray(parsed.settings?.quickNotes) &&
-      parsed.settings.quickNotes.length > 0
-        ? parsed.settings.quickNotes
-        : defaults.quickNotes,
+    quickNotes: importedNotes.length > 0 ? importedNotes : defaults.quickNotes,
   };
 
   const normalizedOrders = normalizeOrders(parsed.orders);
@@ -812,6 +876,7 @@ export const localStorageBoothAdapter: BoothStorageAdapter = {
   getOrders,
   saveOrders,
   addOrder,
+  addWasteOrder,
   updateOrderStatus,
   deleteOrder,
   clearOrdersOnly,

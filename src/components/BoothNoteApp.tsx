@@ -114,7 +114,13 @@ export function BoothNoteApp() {
     let cups = 0;
     let revenue = 0;
     for (const order of orders) {
-      if (order.dateKey !== todayKey || order.status === "void") continue;
+      if (
+        order.dateKey !== todayKey ||
+        order.status === "void" ||
+        order.status === "waste"
+      ) {
+        continue;
+      }
       revenue += order.totalAmount;
       for (const item of order.items) {
         cups += item.quantity;
@@ -132,6 +138,16 @@ export function BoothNoteApp() {
     }) => {
       const { order } = localStorageBoothAdapter.addOrder(input);
       showToast(`ส่งคิว ${formatQueueNumber(order.queueNumber)} แล้ว`);
+      return order;
+    },
+    [showToast]
+  );
+
+  const handleAddWasteOrder = useCallback(
+    (input: { items: NewOrderItemInput[]; reason: string }) => {
+      const { order } = localStorageBoothAdapter.addWasteOrder(input);
+      const cupsCount = order.items.reduce((s, i) => s + i.quantity, 0);
+      showToast(`บันทึกทำเสีย ${cupsCount} แก้ว (${order.note}) แล้ว`);
       return order;
     },
     [showToast]
@@ -344,6 +360,7 @@ export function BoothNoteApp() {
             settings={settings}
             todayKey={todayKey}
             onAddOrder={handleAddOrder}
+            onAddWasteOrder={handleAddWasteOrder}
             onUpdateOrderStatus={handleUpdateOrderStatus}
             onDeleteOrder={handleDeleteOrder}
           />
