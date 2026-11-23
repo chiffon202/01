@@ -1,4 +1,4 @@
-const CACHE_NAME = "booth-note-v4";
+const CACHE_NAME = "booth-note-v5";
 const APP_SHELL_URLS = [
   "/",
   "/manifest.webmanifest",

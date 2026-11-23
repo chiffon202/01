@@ -23,10 +23,14 @@ import {
 import {
   BoothSettings,
   Expense,
+  NewOrderItemInput,
   Order,
+  WASTE_TOPPING_ONLY_MENU_ID,
   formatBaht,
   formatThaiDateLabel,
+  formatThailandTime,
   generateId,
+  roundCurrency,
 } from "@/lib/storage";
 
 interface BudgetTabProps {
@@ -41,6 +45,11 @@ interface BudgetTabProps {
     patch: { title: string; amount: number }
   ) => void;
   onDeleteExpense: (id: string) => void;
+  onAddWasteOrder: (input: {
+    items: NewOrderItemInput[];
+    reason: string;
+  }) => Order;
+  onDeleteOrder: (orderId: string) => void;
   onClearOrdersOnly: () => void;
   onExportJson: () => void;
   onImportJson: (raw: string) => void;
@@ -48,6 +57,12 @@ interface BudgetTabProps {
 }
 
 type SalesFilter = "today" | "all" | string; // 'today' | 'all' | YYYY-MM-DD
+
+const QUICK_WASTE_REASONS = [
+  "ทำหล่น/เละ",
+  "ชิม/แจก",
+  "วัตถุดิบเสีย/อื่นๆ",
+] as const;
 
 export function BudgetTab({
   orders,
@@ -58,6 +73,8 @@ export function BudgetTab({
   onAddExpense,
   onUpdateExpense,
   onDeleteExpense,
+  onAddWasteOrder,
+  onDeleteOrder,
   onClearOrdersOnly,
   onExportJson,
   onImportJson,
@@ -70,6 +87,18 @@ export function BudgetTab({
   // Sales reconcile filter
   const [salesFilter, setSalesFilter] = useState<SalesFilter>("today");
   const [copiedSummary, setCopiedSummary] = useState(false);
+
+  // Waste log collapsible + Quick Waste Modal
+  const [wasteListOpen, setWasteListOpen] = useState(false);
+  const [quickWasteOpen, setQuickWasteOpen] = useState(false);
+  const [quickWasteCups, setQuickWasteCups] = useState("1");
+  const [quickWasteToppings, setQuickWasteToppings] = useState<
+    Record<string, number>
+  >({});
+  const [quickWasteCost, setQuickWasteCost] = useState("");
+  const [quickWasteReason, setQuickWasteReason] = useState<string>(
+    QUICK_WASTE_REASONS[0]
+  );
 
   // Add expense form
   const [expenseTitle, setExpenseTitle] = useState("");
@@ -210,17 +239,19 @@ export function BudgetTab({
 
     for (const order of filteredWasteOrders) {
       for (const item of order.items) {
-        wasteCups += item.quantity;
+        if (item.menuId !== WASTE_TOPPING_ONLY_MENU_ID) {
+          wasteCups = roundCurrency(wasteCups + item.quantity);
+        }
         for (const top of item.toppings) {
           wasteToppingCounts.set(
             top.name,
-            (wasteToppingCounts.get(top.name) ?? 0) + item.quantity
+            roundCurrency((wasteToppingCounts.get(top.name) ?? 0) + item.quantity)
           );
         }
       }
     }
 
-    const totalCupsUsed = salesStats.totalCups + wasteCups;
+    const totalCupsUsed = roundCurrency(salesStats.totalCups + wasteCups);
     const yieldPct =
       totalCupsUsed > 0
         ? ((salesStats.totalCups / totalCupsUsed) * 100).toFixed(1)
@@ -248,14 +279,14 @@ export function BudgetTab({
     const menuLines =
       salesStats.menuEntries.length > 0
         ? salesStats.menuEntries
-            .map(([name, qty]) => `  • ${name}: ${qty} แก้ว`)
+            .map(([name, qty]) => `  • ${name}: ${formatBaht(qty)} แก้ว`)
             .join("\n")
         : "  • ยังไม่มีรายการขาย";
 
     const toppingLines =
       salesStats.toppingEntries.length > 0
         ? salesStats.toppingEntries
-            .map(([name, qty]) => `  • +${name}: ${qty} ที่`)
+            .map(([name, qty]) => `  • +${name}: ${formatBaht(qty)} ที่`)
             .join("\n")
         : "  • ไม่มีท็อปปิ้ง";
 
@@ -271,11 +302,11 @@ export function BudgetTab({
       `📲 โอน (MAKE): ${formatBaht(salesStats.makeTotal)} บาท (${salesStats.makeCount} บิล)`,
       `💵 เงินสด: ${formatBaht(salesStats.cashTotal)} บาท (${salesStats.cashCount} บิล)`,
       `━━━━━━━━━━━━━━`,
-      `🥤 ขายได้ทั้งหมด: ${salesStats.totalCups} แก้ว`,
+      `🥤 ขายได้ทั้งหมด: ${formatBaht(salesStats.totalCups)} แก้ว`,
       menuLines,
       `🧀 ท็อปปิ้งที่ออกไป:`,
       toppingLines,
-      `⚠️ ทำเสีย (Waste): ${wasteStats.wasteCups} แก้ว | ค่า Yield: ${wasteStats.yieldPct}%`,
+      `⚠️ ทำเสีย (Waste): ${formatBaht(wasteStats.wasteCups)} แก้ว | ค่า Yield: ${wasteStats.yieldPct}%`,
       `━━━━━━━━━━━━━━`,
       `🧾 รายจ่ายสะสมทั้งหมด: ${formatBaht(totalExpenses)} / งบ ${formatBaht(budgetLimit)} บาท`,
       `📈 ภาพรวมจุดคุ้มทุน: ${breakEvenLine}`,
@@ -309,7 +340,7 @@ export function BudgetTab({
   const handleSaveBudgetLimit = () => {
     const parsed = Number(budgetDraft);
     if (!Number.isNaN(parsed) && parsed >= 0) {
-      onUpdateSettings({ ...settings, budgetLimit: Math.round(parsed) });
+      onUpdateSettings({ ...settings, budgetLimit: roundCurrency(parsed) });
       onNotify(`อัปเดตเพดานงบเป็น ฿${formatBaht(parsed)} แล้ว`);
     }
     setEditingBudget(false);
@@ -320,7 +351,7 @@ export function BudgetTab({
     const title = expenseTitle.trim();
     const amount = Number(expenseAmount);
     if (!title || Number.isNaN(amount) || amount <= 0) return;
-    onAddExpense({ title, amount: Math.round(amount) });
+    onAddExpense({ title, amount: roundCurrency(amount) });
     setExpenseTitle("");
     setExpenseAmount("");
   };
@@ -336,8 +367,73 @@ export function BudgetTab({
     const title = editExpenseTitle.trim();
     const amount = Number(editExpenseAmount);
     if (!title || Number.isNaN(amount) || amount < 0) return;
-    onUpdateExpense(editingExpenseId, { title, amount: Math.round(amount) });
+    onUpdateExpense(editingExpenseId, { title, amount: roundCurrency(amount) });
     setEditingExpenseId(null);
+  };
+
+  const handleOpenQuickWaste = () => {
+    setQuickWasteCups("1");
+    setQuickWasteToppings({});
+    setQuickWasteCost("");
+    setQuickWasteReason(QUICK_WASTE_REASONS[0]);
+    setQuickWasteOpen(true);
+  };
+
+  const handleSubmitQuickWaste = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cupsNum = Math.max(0, roundCurrency(Number(quickWasteCups) || 0));
+    const costNum = Math.max(0, roundCurrency(Number(quickWasteCost) || 0));
+
+    const selectedToppingEntries = settings.toppings
+      .map((t) => ({ topping: t, qty: quickWasteToppings[t.id] ?? 0 }))
+      .filter((entry) => entry.qty > 0);
+
+    if (cupsNum === 0 && selectedToppingEntries.length === 0 && costNum === 0) {
+      return;
+    }
+
+    const primaryMenu = settings.menus[0] ?? {
+      id: "corn-butter",
+      name: "ข้าวโพดคลุกเนย",
+      price: 25,
+    };
+
+    const wasteItems: NewOrderItemInput[] = [];
+    if (cupsNum > 0) {
+      wasteItems.push({
+        menuId: primaryMenu.id,
+        menuName: primaryMenu.name,
+        unitPrice: primaryMenu.price,
+        toppings: [],
+        quantity: cupsNum,
+      });
+    }
+
+    for (const { topping, qty } of selectedToppingEntries) {
+      wasteItems.push({
+        menuId: WASTE_TOPPING_ONLY_MENU_ID,
+        menuName: "ท็อปปิ้งเสีย",
+        unitPrice: 0,
+        toppings: [{ id: topping.id, name: topping.name, price: topping.price }],
+        quantity: qty,
+      });
+    }
+
+    if (wasteItems.length > 0) {
+      onAddWasteOrder({
+        items: wasteItems,
+        reason: quickWasteReason,
+      });
+    }
+
+    if (costNum > 0) {
+      onAddExpense({
+        title: `ทำเสีย: ${quickWasteReason}`,
+        amount: costNum,
+      });
+    }
+
+    setQuickWasteOpen(false);
   };
 
   const handleUpdateMenuPrice = (menuId: string, rawPrice: string) => {
@@ -346,7 +442,7 @@ export function BudgetTab({
     onUpdateSettings({
       ...settings,
       menus: settings.menus.map((m) =>
-        m.id === menuId ? { ...m, price: Math.round(price) } : m
+        m.id === menuId ? { ...m, price: roundCurrency(price) } : m
       ),
     });
   };
@@ -370,6 +466,21 @@ export function BudgetTab({
     });
   };
 
+  const handleDeleteMenu = (menuId: string) => {
+    if (settings.menus.length <= 1) {
+      onNotify("ต้องมีเมนูหลักอย่างน้อย 1 รายการ", "error");
+      return;
+    }
+    const target = settings.menus.find((m) => m.id === menuId);
+    const nextMenus = settings.menus.filter((m) => m.id !== menuId);
+    // Ensure at least 1 active menu remains
+    if (!nextMenus.some((m) => m.active) && nextMenus[0]) {
+      nextMenus[0] = { ...nextMenus[0], active: true };
+    }
+    onUpdateSettings({ ...settings, menus: nextMenus });
+    if (target) onNotify(`ลบเมนู "${target.name}" แล้ว`);
+  };
+
   const handleAddNewMenu = (e: React.FormEvent) => {
     e.preventDefault();
     const name = newMenuName.trim();
@@ -382,7 +493,7 @@ export function BudgetTab({
         {
           id: generateId("menu"),
           name,
-          price: Math.round(price),
+          price: roundCurrency(price),
           active: true,
         },
       ],
@@ -398,7 +509,7 @@ export function BudgetTab({
     onUpdateSettings({
       ...settings,
       toppings: settings.toppings.map((t) =>
-        t.id === toppingId ? { ...t, price: Math.round(price) } : t
+        t.id === toppingId ? { ...t, price: roundCurrency(price) } : t
       ),
     });
   };
@@ -421,6 +532,15 @@ export function BudgetTab({
     });
   };
 
+  const handleDeleteTopping = (toppingId: string) => {
+    const target = settings.toppings.find((t) => t.id === toppingId);
+    onUpdateSettings({
+      ...settings,
+      toppings: settings.toppings.filter((t) => t.id !== toppingId),
+    });
+    if (target) onNotify(`ลบท็อปปิ้ง "+${target.name}" แล้ว`);
+  };
+
   const handleAddNewTopping = (e: React.FormEvent) => {
     e.preventDefault();
     const name = newToppingName.trim();
@@ -433,7 +553,7 @@ export function BudgetTab({
         {
           id: generateId("top"),
           name,
-          price: Math.round(price),
+          price: roundCurrency(price),
           active: true,
         },
       ],
@@ -529,6 +649,189 @@ export function BudgetTab({
         )
       : null;
 
+  const quickWasteModal =
+    quickWasteOpen && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="quick-waste-title"
+            onClick={() => setQuickWasteOpen(false)}
+            className="fixed inset-0 z-[100] bg-stone-950/45 flex items-center justify-center p-4"
+          >
+            <form
+              onSubmit={handleSubmitQuickWaste}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md rounded-3xl bg-white border border-stone-200 shadow-2xl p-5 space-y-4"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h3
+                  id="quick-waste-title"
+                  className="text-base font-semibold text-stone-900"
+                >
+                  บันทึกทำเสีย (Waste)
+                </h3>
+                <button
+                  type="button"
+                  aria-label="ปิดหน้าต่าง"
+                  onClick={() => setQuickWasteOpen(false)}
+                  className="w-8 h-8 rounded-full bg-stone-100 text-stone-500 flex items-center justify-center"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Cups Wasted */}
+              <div className="space-y-1.5">
+                <div className="text-xs font-medium text-stone-600">
+                  จำนวนแก้วที่ทำเสีย (ใบ)
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {["0", "0.5", "1", "2"].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setQuickWasteCups(preset)}
+                      className={`min-h-[38px] px-3 rounded-xl border text-xs font-semibold tabular-nums transition-colors ${
+                        quickWasteCups === preset
+                          ? "bg-rose-600 border-rose-600 text-white"
+                          : "bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100"
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step="0.01"
+                    min="0"
+                    value={quickWasteCups}
+                    onChange={(e) => setQuickWasteCups(e.target.value)}
+                    placeholder="ระบุ"
+                    className="flex-1 min-w-0 min-h-[38px] px-3 py-1.5 rounded-xl bg-stone-50 border border-stone-200 text-sm font-semibold text-stone-900 tabular-nums text-right focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              </div>
+
+              {/* Toppings Wasted */}
+              {settings.toppings.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-stone-600">
+                    ท็อปปิ้งที่เสียไป (ที่)
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {settings.toppings.map((topping) => {
+                      const qty = quickWasteToppings[topping.id] ?? 0;
+                      return (
+                        <div
+                          key={topping.id}
+                          className="flex items-center justify-between gap-2 rounded-xl bg-stone-50 border border-stone-200/80 px-2.5 py-1.5"
+                        >
+                          <span className="text-xs font-semibold text-stone-800 truncate">
+                            +{topping.name}
+                          </span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              aria-label={`ลด ${topping.name}`}
+                              onClick={() =>
+                                setQuickWasteToppings((prev) => ({
+                                  ...prev,
+                                  [topping.id]: Math.max(0, (prev[topping.id] ?? 0) - 1),
+                                }))
+                              }
+                              className="w-7 h-7 rounded-lg bg-white border border-stone-200 text-stone-600 font-bold text-xs"
+                            >
+                              -
+                            </button>
+                            <span className="w-5 text-center text-xs font-bold tabular-nums">
+                              {qty}
+                            </span>
+                            <button
+                              type="button"
+                              aria-label={`เพิ่ม ${topping.name}`}
+                              onClick={() =>
+                                setQuickWasteToppings((prev) => ({
+                                  ...prev,
+                                  [topping.id]: (prev[topping.id] ?? 0) + 1,
+                                }))
+                              }
+                              className="w-7 h-7 rounded-lg bg-white border border-stone-200 text-stone-800 font-bold text-xs"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Optional Monetary Cost (e.g. 8.33 THB) */}
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="quick-waste-cost"
+                  className="block text-xs font-medium text-stone-600"
+                >
+                  มูลค่าวัตถุดิบที่เสียเป็นเงิน (บาท · ไม่บังคับ)
+                </label>
+                <input
+                  id="quick-waste-cost"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0"
+                  value={quickWasteCost}
+                  onChange={(e) => setQuickWasteCost(e.target.value)}
+                  placeholder="เช่น 8.33 (ระบบจะลงรายจ่ายให้อัตโนมัติ)"
+                  className="w-full min-h-[40px] px-3 py-1.5 rounded-xl bg-stone-50 border border-stone-200 text-sm font-semibold text-stone-900 tabular-nums placeholder:text-stone-400 focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              {/* Reason Pills */}
+              <div className="space-y-1.5">
+                <div className="text-xs font-medium text-stone-600">เหตุผล</div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {QUICK_WASTE_REASONS.map((reason) => (
+                    <button
+                      key={reason}
+                      type="button"
+                      onClick={() => setQuickWasteReason(reason)}
+                      className={`min-h-[38px] px-2 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                        quickWasteReason === reason
+                          ? "bg-rose-600 border-rose-600 text-white"
+                          : "bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100"
+                      }`}
+                    >
+                      {reason}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setQuickWasteOpen(false)}
+                  className="min-h-[44px] rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-semibold"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="min-h-[44px] rounded-2xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold"
+                >
+                  บันทึกทำเสีย
+                </button>
+              </div>
+            </form>
+          </div>,
+          document.body
+        )
+      : null;
+
   return (
     <>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start pb-6">
@@ -561,7 +864,8 @@ export function BudgetTab({
             <div className="flex items-center gap-1.5">
               <input
                 type="number"
-                inputMode="numeric"
+                inputMode="decimal"
+                step="0.01"
                 value={budgetDraft}
                 onChange={(e) => setBudgetDraft(e.target.value)}
                 className="w-24 px-2.5 py-1 rounded-xl border border-amber-400 text-sm font-semibold text-stone-900 tabular-nums focus:outline-none"
@@ -874,32 +1178,42 @@ export function BudgetTab({
 
           {/* Cup Stock & Yield Section */}
           <div className="pt-3 border-t border-stone-100 space-y-2.5">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-stone-700">
                 สต็อกแก้ว &amp; ค่า Yield
               </span>
-              <span className="px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200/80 text-amber-900 text-xs font-bold tabular-nums">
-                Yield {wasteStats.yieldPct}%
-              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleOpenQuickWaste}
+                  className="px-2.5 py-1 rounded-full bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-[11px] font-semibold inline-flex items-center gap-1 active:scale-95"
+                >
+                  <Plus className="w-3 h-3" />
+                  บันทึกทำเสีย
+                </button>
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200/80 text-amber-900 text-xs font-bold tabular-nums">
+                  Yield {wasteStats.yieldPct}%
+                </span>
+              </div>
             </div>
 
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="rounded-xl bg-stone-50 border border-stone-200/70 py-2 px-2">
                 <div className="text-[11px] text-stone-500">ขายได้</div>
                 <div className="text-sm font-bold text-stone-900 tabular-nums mt-0.5">
-                  {salesStats.totalCups} ใบ
+                  {formatBaht(salesStats.totalCups)} ใบ
                 </div>
               </div>
               <div className="rounded-xl bg-rose-50/70 border border-rose-200/70 py-2 px-2">
                 <div className="text-[11px] text-rose-700">ทำเสีย (Waste)</div>
                 <div className="text-sm font-bold text-rose-700 tabular-nums mt-0.5">
-                  {wasteStats.wasteCups} ใบ
+                  {formatBaht(wasteStats.wasteCups)} ใบ
                 </div>
               </div>
               <div className="rounded-xl bg-amber-50/70 border border-amber-200/70 py-2 px-2">
                 <div className="text-[11px] text-amber-900">ใช้แก้วรวม</div>
                 <div className="text-sm font-bold text-amber-950 tabular-nums mt-0.5">
-                  {wasteStats.totalCupsUsed} ใบ
+                  {formatBaht(wasteStats.totalCupsUsed)} ใบ
                 </div>
               </div>
             </div>
@@ -911,11 +1225,67 @@ export function BudgetTab({
               ) : (
                 <span className="font-semibold text-rose-700 tabular-nums text-right">
                   {wasteStats.wasteToppingEntries
-                    .map(([name, qty]) => `+${name} ${qty} ที่`)
+                    .map(([name, qty]) => `+${name} ${formatBaht(qty)} ที่`)
                     .join(" · ")}
                 </span>
               )}
             </div>
+
+            {filteredWasteOrders.length > 0 && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setWasteListOpen((prev) => !prev)}
+                  className="text-[11px] font-medium text-stone-500 hover:text-stone-800 inline-flex items-center gap-1"
+                >
+                  {wasteListOpen ? (
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  )}
+                  ดูรายการทำเสีย ({filteredWasteOrders.length})
+                </button>
+
+                {wasteListOpen && (
+                  <ul className="mt-2 divide-y divide-stone-100 rounded-xl bg-stone-50/80 border border-stone-200/70 px-3">
+                    {filteredWasteOrders.map((wo) => {
+                      const cupQty = wo.items
+                        .filter((i) => i.menuId !== WASTE_TOPPING_ONLY_MENU_ID)
+                        .reduce((s, i) => s + i.quantity, 0);
+                      const topSummary = wo.items
+                        .flatMap((i) =>
+                          i.toppings.map((t) => `+${t.name}×${formatBaht(i.quantity)}`)
+                        )
+                        .join(", ");
+                      return (
+                        <li
+                          key={wo.id}
+                          className="py-2 flex items-center justify-between gap-2 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <span className="font-medium text-stone-800">
+                              {cupQty > 0 ? `${formatBaht(cupQty)} แก้ว` : "ท็อปปิ้ง"}
+                              {topSummary ? ` (${topSummary})` : ""}
+                            </span>
+                            <span className="text-stone-400 ml-1.5">
+                              · {wo.note || "ทำเสีย"} ({formatThailandTime(wo.createdAt)})
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            aria-label="ลบรายการทำเสีย"
+                            onClick={() => onDeleteOrder(wo.id)}
+                            className="p-1 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 shrink-0"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -948,8 +1318,9 @@ export function BudgetTab({
             />
             <input
               type="number"
-              inputMode="numeric"
-              min={1}
+              inputMode="decimal"
+              step="0.01"
+              min="0.01"
               value={expenseAmount}
               onChange={(e) => setExpenseAmount(e.target.value)}
               placeholder="บาท"
@@ -988,7 +1359,8 @@ export function BudgetTab({
                       <div className="flex items-center gap-2">
                         <input
                           type="number"
-                          inputMode="numeric"
+                          inputMode="decimal"
+                          step="0.01"
                           value={editExpenseAmount}
                           onChange={(e) => setEditExpenseAmount(e.target.value)}
                           className="w-28 min-h-[38px] px-3 py-1.5 rounded-xl border border-amber-400 text-sm font-semibold text-stone-900 tabular-nums focus:outline-none"
@@ -1083,7 +1455,7 @@ export function BudgetTab({
               <h3 className="text-xs font-semibold text-stone-500">เมนูหลัก</h3>
               <div className="space-y-2">
                 {settings.menus.map((menu) => (
-                  <div key={menu.id} className="flex items-center gap-2">
+                  <div key={menu.id} className="flex items-center gap-1.5">
                     <input
                       type="text"
                       value={menu.name}
@@ -1094,7 +1466,8 @@ export function BudgetTab({
                     />
                     <input
                       type="number"
-                      inputMode="numeric"
+                      inputMode="decimal"
+                      step="0.01"
                       value={menu.price}
                       onChange={(e) =>
                         handleUpdateMenuPrice(menu.id, e.target.value)
@@ -1112,6 +1485,15 @@ export function BudgetTab({
                     >
                       {menu.active ? "เปิด" : "ซ่อน"}
                     </button>
+                    <button
+                      type="button"
+                      aria-label={`ลบเมนู ${menu.name}`}
+                      onClick={() => handleDeleteMenu(menu.id)}
+                      disabled={settings.menus.length <= 1}
+                      className="w-9 h-[38px] rounded-xl text-stone-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-30 disabled:pointer-events-none flex items-center justify-center shrink-0"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -1128,7 +1510,8 @@ export function BudgetTab({
                 />
                 <input
                   type="number"
-                  inputMode="numeric"
+                  inputMode="decimal"
+                  step="0.01"
                   value={newMenuPrice}
                   onChange={(e) => setNewMenuPrice(e.target.value)}
                   placeholder="ราคา"
@@ -1148,7 +1531,7 @@ export function BudgetTab({
               <h3 className="text-xs font-semibold text-stone-500">ท็อปปิ้ง</h3>
               <div className="space-y-2">
                 {settings.toppings.map((topping) => (
-                  <div key={topping.id} className="flex items-center gap-2">
+                  <div key={topping.id} className="flex items-center gap-1.5">
                     <input
                       type="text"
                       value={topping.name}
@@ -1159,7 +1542,8 @@ export function BudgetTab({
                     />
                     <input
                       type="number"
-                      inputMode="numeric"
+                      inputMode="decimal"
+                      step="0.01"
                       value={topping.price}
                       onChange={(e) =>
                         handleUpdateToppingPrice(topping.id, e.target.value)
@@ -1177,6 +1561,14 @@ export function BudgetTab({
                     >
                       {topping.active ? "เปิด" : "ซ่อน"}
                     </button>
+                    <button
+                      type="button"
+                      aria-label={`ลบท็อปปิ้ง ${topping.name}`}
+                      onClick={() => handleDeleteTopping(topping.id)}
+                      className="w-9 h-[38px] rounded-xl text-stone-400 hover:bg-rose-50 hover:text-rose-600 flex items-center justify-center shrink-0"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -1193,7 +1585,8 @@ export function BudgetTab({
                 />
                 <input
                   type="number"
-                  inputMode="numeric"
+                  inputMode="decimal"
+                  step="0.01"
                   value={newToppingPrice}
                   onChange={(e) => setNewToppingPrice(e.target.value)}
                   placeholder="ราคา"
@@ -1289,6 +1682,7 @@ export function BudgetTab({
       </div>
 
       {confirmModal}
+      {quickWasteModal}
     </>
   );
 }

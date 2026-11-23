@@ -201,10 +201,19 @@ export function formatQueueNumber(queueNumber: number): string {
   return `#${String(queueNumber).padStart(2, "0")}`;
 }
 
+export const WASTE_TOPPING_ONLY_MENU_ID = "__topping_only__";
+
+export function roundCurrency(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
 export function formatBaht(amount: number): string {
+  const safe = roundCurrency(amount);
   return new Intl.NumberFormat("th-TH", {
-    maximumFractionDigits: 0,
-  }).format(Math.round(amount));
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(safe);
 }
 
 // ----------------------------------------------------------------------------
@@ -340,17 +349,17 @@ function normalizeOrderItem(raw: Partial<OrderItem>): OrderItem {
     : [];
   const unitPrice =
     typeof raw.unitPrice === "number" && !Number.isNaN(raw.unitPrice)
-      ? raw.unitPrice
+      ? roundCurrency(raw.unitPrice)
       : 25;
   const quantity =
     typeof raw.quantity === "number" && raw.quantity > 0
-      ? Math.round(raw.quantity)
+      ? roundCurrency(raw.quantity)
       : 1;
   const toppingsSum = toppings.reduce((s, t) => s + t.price, 0);
   const lineTotal =
     typeof raw.lineTotal === "number" && !Number.isNaN(raw.lineTotal)
-      ? raw.lineTotal
-      : (unitPrice + toppingsSum) * quantity;
+      ? roundCurrency(raw.lineTotal)
+      : roundCurrency((unitPrice + toppingsSum) * quantity);
 
   return {
     id: typeof raw.id === "string" ? raw.id : generateId("item"),
@@ -387,8 +396,8 @@ function normalizeOrders(rawList: unknown): Order[] {
       status === "waste"
         ? 0
         : typeof o.totalAmount === "number" && !Number.isNaN(o.totalAmount)
-        ? o.totalAmount
-        : items.reduce((s, i) => s + i.lineTotal, 0);
+        ? roundCurrency(o.totalAmount)
+        : roundCurrency(items.reduce((s, i) => s + i.lineTotal, 0));
     const createdAt =
       typeof o.createdAt === "string" ? o.createdAt : new Date().toISOString();
     result.push({
@@ -475,16 +484,18 @@ export function addOrder(input: NewOrderInput): {
       id: generateId("item"),
       menuId: item.menuId,
       menuName: item.menuName,
-      unitPrice: item.unitPrice,
+      unitPrice: roundCurrency(item.unitPrice),
       toppings: item.toppings,
       noteTags: item.noteTags ?? [],
       note: item.note?.trim() || undefined,
       quantity: qty,
-      lineTotal: lineUnit * qty,
+      lineTotal: roundCurrency(lineUnit * qty),
     };
   });
 
-  const totalAmount = items.reduce((sum, item) => sum + item.lineTotal, 0);
+  const totalAmount = roundCurrency(
+    items.reduce((sum, item) => sum + item.lineTotal, 0)
+  );
 
   const newOrder: Order = {
     id: generateId("ord"),
@@ -518,12 +529,12 @@ export function addWasteOrder(input: {
   const dateKey = getThailandDateKey(now);
 
   const items: OrderItem[] = input.items.map((item) => {
-    const qty = Math.max(1, Math.round(item.quantity));
+    const qty = Math.max(0.1, roundCurrency(item.quantity));
     return {
       id: generateId("item"),
       menuId: item.menuId,
       menuName: item.menuName,
-      unitPrice: item.unitPrice,
+      unitPrice: roundCurrency(item.unitPrice),
       toppings: item.toppings,
       noteTags: item.noteTags ?? [],
       note: item.note?.trim() || undefined,
@@ -643,7 +654,7 @@ export function addExpense(input: NewExpenseInput): Expense[] {
   const expense: Expense = {
     id: generateId("exp"),
     title: input.title.trim(),
-    amount: Math.max(0, Number(input.amount) || 0),
+    amount: Math.max(0, roundCurrency(Number(input.amount) || 0)),
     dateKey: input.dateKey ?? getThailandDateKey(),
     createdAt: nowIso,
     updatedAt: nowIso,
@@ -664,7 +675,7 @@ export function updateExpense(
     return {
       ...item,
       title: patch.title.trim(),
-      amount: Math.max(0, Number(patch.amount) || 0),
+      amount: Math.max(0, roundCurrency(Number(patch.amount) || 0)),
       updatedAt: nowIso,
     };
   });

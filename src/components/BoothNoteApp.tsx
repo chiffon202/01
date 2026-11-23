@@ -19,6 +19,7 @@ import {
   NewOrderItemInput,
   OrderStatus,
   PaymentMethod,
+  WASTE_TOPPING_ONLY_MENU_ID,
   formatBaht,
   formatQueueNumber,
   getExpensesSnapshot,
@@ -146,8 +147,14 @@ export function BoothNoteApp() {
   const handleAddWasteOrder = useCallback(
     (input: { items: NewOrderItemInput[]; reason: string }) => {
       const { order } = localStorageBoothAdapter.addWasteOrder(input);
-      const cupsCount = order.items.reduce((s, i) => s + i.quantity, 0);
-      showToast(`บันทึกทำเสีย ${cupsCount} แก้ว (${order.note}) แล้ว`);
+      const cupsCount = order.items
+        .filter((i) => i.menuId !== WASTE_TOPPING_ONLY_MENU_ID)
+        .reduce((s, i) => s + i.quantity, 0);
+      showToast(
+        cupsCount > 0
+          ? `บันทึกทำเสีย ${formatBaht(cupsCount)} แก้ว (${order.note}) แล้ว`
+          : `บันทึกทำเสียท็อปปิ้ง (${order.note}) แล้ว`
+      );
       return order;
     },
     [showToast]
@@ -374,6 +381,8 @@ export function BoothNoteApp() {
             onAddExpense={handleAddExpense}
             onUpdateExpense={handleUpdateExpense}
             onDeleteExpense={handleDeleteExpense}
+            onAddWasteOrder={handleAddWasteOrder}
+            onDeleteOrder={handleDeleteOrder}
             onClearOrdersOnly={handleClearOrdersOnly}
             onExportJson={handleExportJson}
             onImportJson={handleImportJson}
