@@ -118,6 +118,7 @@ export function BudgetTab({
 
   // Clear test bills confirmation modal
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+  const [clearConfirmText, setClearConfirmText] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // --------------------------------------------------------------------------
@@ -294,6 +295,37 @@ export function BudgetTab({
       ? `✅ คืนทุนแล้ว (กำไรสุทธิ +${formatBaht(netProfit)} บาท)`
       : `⏳ ขาดอีก ${formatBaht(Math.abs(netProfit))} บาทจะคืนทุน`;
 
+    let dailyBreakdownBlock = "";
+    if (salesFilter === "all" && availableDateKeys.length > 0) {
+      const chronologicalDates = [...availableDateKeys].sort((a, b) =>
+        a.localeCompare(b)
+      );
+      const dayLines = chronologicalDates.map((dk) => {
+        let dayCups = 0;
+        let dayMake = 0;
+        let dayCash = 0;
+        let dayWaste = 0;
+        for (const o of soldOrdersAll) {
+          if (o.dateKey !== dk) continue;
+          if (o.paymentMethod === "make") dayMake += o.totalAmount;
+          else dayCash += o.totalAmount;
+          for (const it of o.items) dayCups += it.quantity;
+        }
+        for (const w of wasteOrdersAll) {
+          if (w.dateKey !== dk) continue;
+          for (const it of w.items) {
+            if (it.menuId !== WASTE_TOPPING_ONLY_MENU_ID) {
+              dayWaste = roundCurrency(dayWaste + it.quantity);
+            }
+          }
+        }
+        const dayTotal = roundCurrency(dayMake + dayCash);
+        const wastePart = dayWaste > 0 ? ` · เสีย ${formatBaht(dayWaste)}` : "";
+        return `  • ${formatThaiDateLabel(dk)}: ${formatBaht(dayCups)} แก้ว · ${formatBaht(dayTotal)} บาท (โอน ${formatBaht(dayMake)} / สด ${formatBaht(dayCash)})${wastePart}`;
+      });
+      dailyBreakdownBlock = [`📆 สรุปรายวัน:`, ...dayLines].join("\n");
+    }
+
     const summaryText = [
       `🌽 สรุปยอดขาย ${settings.boothName}`,
       `📅 ช่วงเวลา: ${filterDisplayLabel}`,
@@ -307,6 +339,7 @@ export function BudgetTab({
       `🧀 ท็อปปิ้งที่ออกไป:`,
       toppingLines,
       `⚠️ ทำเสีย (Waste): ${formatBaht(wasteStats.wasteCups)} แก้ว | ค่า Yield: ${wasteStats.yieldPct}%`,
+      ...(dailyBreakdownBlock ? [`━━━━━━━━━━━━━━`, dailyBreakdownBlock] : []),
       `━━━━━━━━━━━━━━`,
       `🧾 รายจ่ายสะสมทั้งหมด: ${formatBaht(totalExpenses)} / งบ ${formatBaht(budgetLimit)} บาท`,
       `📈 ภาพรวมจุดคุ้มทุน: ${breakEvenLine}`,
@@ -581,7 +614,9 @@ export function BudgetTab({
   };
 
   const handleConfirmClearOrders = () => {
+    if (clearConfirmText.trim() !== "ลบ") return;
     onClearOrdersOnly();
+    setClearConfirmText("");
     setConfirmClearOpen(false);
     setSalesFilter("today");
   };
@@ -593,7 +628,10 @@ export function BudgetTab({
             role="dialog"
             aria-modal="true"
             aria-labelledby="clear-orders-title"
-            onClick={() => setConfirmClearOpen(false)}
+            onClick={() => {
+              setClearConfirmText("");
+              setConfirmClearOpen(false);
+            }}
             className="fixed inset-0 z-[100] bg-stone-950/45 flex items-center justify-center p-4"
           >
             <div
@@ -604,33 +642,52 @@ export function BudgetTab({
                 <span className="w-10 h-10 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
                   <AlertTriangle className="w-5 h-5" />
                 </span>
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   <h3
                     id="clear-orders-title"
                     className="text-base font-semibold text-stone-900"
                   >
-                    ล้างเฉพาะบิลทดสอบ?
+                    ยืนยันล้างบิลทั้งหมด ({orders.length} บิล)?
                   </h3>
                   <p className="text-xs text-stone-600 leading-relaxed">
-                    ระบบจะลบออเดอร์ทั้งหมด{" "}
-                    <strong className="text-stone-900">
-                      ({orders.length} บิล)
+                    ระบบจะลบ{" "}
+                    <strong className="text-rose-700">
+                      บิลขายและทำเสียทุกวัน ({orders.length} บิล)
                     </strong>{" "}
-                    และรีเซ็ตคิวกลับเป็น{" "}
-                    <strong className="text-stone-900">#01</strong> แต่จะ
-                    <strong className="text-emerald-700">
-                      ไม่ลบรายการรายจ่าย ({expenses.length} รายการ · ฿
-                      {formatBaht(totalExpenses)})
-                    </strong>{" "}
-                    และเมนูของคุณ
+                    โดยจะไม่ลบรายจ่าย (฿{formatBaht(totalExpenses)})
+                  </p>
+                  <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200/70 rounded-xl px-2.5 py-1.5 leading-relaxed">
+                    หมายเหตุ: คิวจะรีเซ็ตเป็น #01 อัตโนมัติทุกวันใหม่อยู่แล้ว ไม่จำเป็นต้องกดล้างเพื่อเริ่มวันใหม่ครับ
                   </p>
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="confirm-clear-input"
+                  className="block text-xs font-medium text-stone-600"
+                >
+                  พิมพ์คำว่า <strong className="text-rose-700">ลบ</strong>{" "}
+                  เพื่อยืนยัน
+                </label>
+                <input
+                  id="confirm-clear-input"
+                  type="text"
+                  value={clearConfirmText}
+                  onChange={(e) => setClearConfirmText(e.target.value)}
+                  placeholder='พิมพ์ "ลบ" ที่นี่'
+                  className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-stone-50 border border-stone-200 text-sm font-semibold text-stone-900 focus:outline-none focus:border-rose-400"
+                  autoFocus
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-2.5 pt-1">
                 <button
                   type="button"
-                  onClick={() => setConfirmClearOpen(false)}
+                  onClick={() => {
+                    setClearConfirmText("");
+                    setConfirmClearOpen(false);
+                  }}
                   className="min-h-[46px] rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-semibold active:scale-[0.98]"
                 >
                   ยกเลิก
@@ -638,7 +695,8 @@ export function BudgetTab({
                 <button
                   type="button"
                   onClick={handleConfirmClearOrders}
-                  className="min-h-[46px] rounded-2xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold active:scale-[0.98]"
+                  disabled={clearConfirmText.trim() !== "ลบ"}
+                  className="min-h-[46px] rounded-2xl bg-rose-600 hover:bg-rose-700 disabled:bg-stone-200 disabled:text-stone-400 text-white text-sm font-semibold active:scale-[0.98]"
                 >
                   ยืนยันล้างบิล
                 </button>
@@ -1600,19 +1658,60 @@ export function BudgetTab({
                 </button>
               </form>
             </div>
+
+            {/* Danger Zone: Clear All Orders (moved inside collapsible settings for safety) */}
+            <div className="pt-3 border-t border-stone-100 space-y-2">
+              <div className="text-xs font-semibold text-rose-700">
+                ล้างข้อมูลบิลทั้งหมด (เฉพาะกรณีรีเซ็ตใหม่)
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (orders.length === 0) {
+                    onNotify("ยังไม่มีบิลให้ล้าง (คิวพร้อมเริ่มที่ #01)");
+                    return;
+                  }
+                  setClearConfirmText("");
+                  setConfirmClearOpen(true);
+                }}
+                className={`w-full min-h-[42px] px-3.5 py-2 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 transition-colors active:scale-[0.99] ${
+                  orders.length > 0
+                    ? "bg-rose-50/70 hover:bg-rose-100/80 border-rose-200 text-rose-700"
+                    : "bg-stone-50 border-stone-200 text-stone-400"
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <Trash2 className="w-4 h-4 shrink-0" />
+                  <span>ล้างเฉพาะบิลทดสอบ / ล้างบิลทั้งหมด</span>
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-semibold tabular-nums ${
+                    orders.length > 0
+                      ? "bg-rose-600 text-white"
+                      : "bg-stone-200 text-stone-500"
+                  }`}
+                >
+                  {orders.length} บิล
+                </span>
+              </button>
+              <p className="text-[11px] text-stone-400 leading-relaxed">
+                คิวรีเซ็ตเป็น #01 อัตโนมัติทุกวันใหม่อยู่แล้ว ปุ่มนี้ใช้เฉพาะตอนต้องการลบบิลทั้งหมดทิ้ง (ไม่ลบรายจ่าย ฿
+                {formatBaht(totalExpenses)})
+              </p>
+            </div>
           </div>
         )}
       </section>
 
       {/* =================================================================== */}
-      {/* 4B. BACKUP & CLEAR TEST BILLS (ALWAYS DIRECTLY ACCESSIBLE)          */}
+      {/* 4B. BACKUP (JSON EXPORT / IMPORT)                                   */}
       {/* =================================================================== */}
       <section
-        aria-label="สำรองข้อมูลและล้างบิลทดสอบ"
+        aria-label="สำรองข้อมูล"
         className="rounded-2xl bg-white border border-stone-200/80 p-4 space-y-3"
       >
         <div className="text-xs font-semibold text-stone-500">
-          สำรองข้อมูล &amp; เคลียร์ก่อนเปิดร้าน
+          สำรองข้อมูลเก็บไว้หลังปิดร้าน (JSON)
         </div>
 
         <div className="grid grid-cols-2 gap-2">
@@ -1640,42 +1739,6 @@ export function BudgetTab({
             onChange={handleFileImport}
             className="hidden"
           />
-        </div>
-
-        <div className="pt-2 border-t border-stone-100">
-          <button
-            type="button"
-            onClick={() => {
-              if (orders.length === 0) {
-                onNotify("ยังไม่มีบิลให้ล้าง (คิวพร้อมเริ่มที่ #01)");
-                return;
-              }
-              setConfirmClearOpen(true);
-            }}
-            className={`w-full min-h-[46px] px-4 py-2.5 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 transition-colors active:scale-[0.99] ${
-              orders.length > 0
-                ? "bg-rose-50/70 hover:bg-rose-100/80 border-rose-200 text-rose-700"
-                : "bg-stone-50 border-stone-200 text-stone-400"
-            }`}
-          >
-            <span className="flex items-center gap-2">
-              <Trash2 className="w-4 h-4 shrink-0" />
-              <span>ล้างเฉพาะบิลทดสอบ</span>
-            </span>
-            <span
-              className={`px-2 py-0.5 rounded-full text-[11px] font-semibold tabular-nums ${
-                orders.length > 0
-                  ? "bg-rose-600 text-white"
-                  : "bg-stone-200 text-stone-500"
-              }`}
-            >
-              {orders.length} บิล
-            </span>
-          </button>
-          <p className="text-[11px] text-stone-400 mt-1.5 px-0.5">
-            ลบเฉพาะออเดอร์และรีเซ็ตคิวเป็น #01 โดยไม่ลบรายการรายจ่าย (฿
-            {formatBaht(totalExpenses)})
-          </p>
         </div>
       </section>
       </div>

@@ -54,6 +54,29 @@ function subscribeOnlineStatus(callback: () => void): () => void {
   };
 }
 
+function subscribeThailandDayChange(callback: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  let lastKey = getThailandDateKey();
+  const check = () => {
+    const currentKey = getThailandDateKey();
+    if (currentKey !== lastKey) {
+      lastKey = currentKey;
+      callback();
+    }
+  };
+  const onVisibility = () => {
+    if (document.visibilityState === "visible") check();
+  };
+  window.addEventListener("focus", check);
+  document.addEventListener("visibilitychange", onVisibility);
+  const timer = window.setInterval(check, 30_000);
+  return () => {
+    window.removeEventListener("focus", check);
+    document.removeEventListener("visibilitychange", onVisibility);
+    window.clearInterval(timer);
+  };
+}
+
 export function BoothNoteApp() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("order");
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -103,7 +126,11 @@ export function BoothNoteApp() {
     getServerSettingsSnapshot
   );
 
-  const todayKey = hydrated ? getThailandDateKey() : "";
+  const todayKey = useSyncExternalStore(
+    subscribeThailandDayChange,
+    getThailandDateKey,
+    () => ""
+  );
 
   const pendingCount = useMemo(
     () => orders.filter((o) => o.status === "pending").length,
