@@ -1,50 +1,28 @@
 // ============================================================================
-// Treasurer Note — Storage Layer (localStorage implementation)
+// Treasurer Note — Storage Layer (Multi-Project Offline Ledger)
 // ----------------------------------------------------------------------------
-// Offline-first ledger storage for income/expense bills, math formulas,
-// categories, receipt references, claimant names, and reimbursement status.
-// Designed behind clean adapter functions for easy future cloud sync.
+// Clean slate per activity/project (zero default fake budgets).
+// All metadata persists in localStorage; receipt photos persist in IndexedDB.
 // ============================================================================
 
 import { roundAmount } from "./mathEval";
+import { deleteReceiptImage } from "./imageStore";
 
 export type EntryType = "expense" | "income";
 export type PaymentChannel = "make" | "cash" | "bank" | "other";
 export type ReimburseStatus = "settled" | "pending";
 
+export interface ActivityProject {
+  id: string;
+  name: string;
+  organizationName: string;
+  budgetLimit: number; // 0 = no fixed budget cap
+  createdAt: string;
+}
+
 export interface LedgerEntry {
   id: string;
-  type: EntryType;
-  title: string;
-  amount: number;
-  formula?: string; // e.g. "120+45*2" when calculated from an expression
-  category: string;
-  channel: PaymentChannel;
-  receiptRef: string; // Invoice / slip / receipt number
-  personName: string; // Claimant / payer / recipient
-  reimburseStatus: ReimburseStatus; // "settled" | "pending" (สำรองจ่ายรอคืน)
-  note: string;
-  dateKey: string; // YYYY-MM-DD in Asia/Bangkok (+07:00)
-  createdAt: string; // ISO 8601
-  updatedAt: string; // ISO 8601
-}
-
-export interface LedgerSettings {
-  ledgerName: string;
-  organizationName: string;
-  startingBudget: number;
-  expenseCategories: string[];
-  incomeCategories: string[];
-}
-
-export interface LedgerDataSnapshot {
-  version: number;
-  exportedAt: string;
-  entries: LedgerEntry[];
-  settings: LedgerSettings;
-}
-
-export interface NewLedgerEntryInput {
+  projectId: string;
   type: EntryType;
   title: string;
   amount: number;
@@ -54,6 +32,41 @@ export interface NewLedgerEntryInput {
   receiptRef: string;
   personName: string;
   reimburseStatus: ReimburseStatus;
+  verified: boolean; // True once treasurer checks receipt / reconciles total
+  imageId?: string; // Reference key in IndexedDB receipt store
+  note: string;
+  dateKey: string; // YYYY-MM-DD in Asia/Bangkok (+07:00)
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LedgerSettings {
+  activeProjectId: string;
+  expenseCategories: string[];
+  incomeCategories: string[];
+}
+
+export interface LedgerDataSnapshot {
+  version: number;
+  exportedAt: string;
+  projects: ActivityProject[];
+  entries: LedgerEntry[];
+  settings: LedgerSettings;
+}
+
+export interface NewLedgerEntryInput {
+  projectId: string;
+  type: EntryType;
+  title: string;
+  amount: number;
+  formula?: string;
+  category: string;
+  channel: PaymentChannel;
+  receiptRef: string;
+  personName: string;
+  reimburseStatus: ReimburseStatus;
+  verified?: boolean;
+  imageId?: string;
   note: string;
   dateKey?: string;
 }
@@ -68,23 +81,16 @@ export interface UpdateLedgerEntryPatch {
   receiptRef: string;
   personName: string;
   reimburseStatus: ReimburseStatus;
+  verified?: boolean;
+  imageId?: string;
   note: string;
   dateKey: string;
 }
 
-export interface LegacyBoothSummary {
-  expensesCount: number;
-  expensesTotal: number;
-  ordersCount: number;
-  salesTotal: number;
-}
-
 export const STORAGE_KEYS = {
-  ENTRIES: "treasurer_note:v1:entries",
-  SETTINGS: "treasurer_note:v1:settings",
-  LEGACY_BOOTH_EXPENSES: "booth_note:v1:expenses",
-  LEGACY_BOOTH_ORDERS: "booth_note:v1:orders",
-  LEGACY_BOOTH_SETTINGS: "booth_note:v1:settings",
+  PROJECTS: "treasurer_note:v2:projects",
+  ENTRIES: "treasurer_note:v2:entries",
+  SETTINGS: "treasurer_note:v2:settings",
 } as const;
 
 export const CHANNEL_LABELS: Record<PaymentChannel, string> = {
@@ -92,11 +98,6 @@ export const CHANNEL_LABELS: Record<PaymentChannel, string> = {
   cash: "เงินสด",
   bank: "บัญชีธนาคาร",
   other: "อื่น ๆ",
-};
-
-export const REIMBURSE_LABELS: Record<ReimburseStatus, string> = {
-  settled: "จ่าย/เคลียร์แล้ว",
-  pending: "สำรองจ่าย · รอคืนเงิน",
 };
 
 const STORAGE_CHANGE_EVENT = "treasurer-note-storage-change";
@@ -118,15 +119,6 @@ export function getThailandDateKey(
   const m = String(thaiDate.getUTCMonth() + 1).padStart(2, "0");
   const d = String(thaiDate.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
-}
-
-export function formatThailandTime(isoString: string): string {
-  const date = new Date(isoString);
-  if (Number.isNaN(date.getTime())) return "--:--";
-  const thaiDate = new Date(date.getTime() + THAILAND_OFFSET_MS);
-  const hh = String(thaiDate.getUTCHours()).padStart(2, "0");
-  const mm = String(thaiDate.getUTCMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
 }
 
 const THAI_SHORT_MONTHS = [
@@ -175,30 +167,38 @@ export function formatBaht(amount: number): string {
 }
 
 // ----------------------------------------------------------------------------
-// Defaults
+// Defaults (Clean Slate: 0 Baht, No Dummy Data)
 // ----------------------------------------------------------------------------
+
+export const DEFAULT_PROJECT_ID = "proj_default";
 
 export const DEFAULT_EXPENSE_CATEGORIES: string[] = [
   "ค่าวัสดุ/อุปกรณ์",
   "ค่าอาหาร/เครื่องดื่ม",
   "ค่าเดินทาง/ขนส่ง",
   "ค่าเอกสาร/ปริ้นท์",
-  "ค่าสถานที่/ตกแต่ง",
-  "ค่าใช้จ่ายอื่น ๆ",
+  "อื่น ๆ",
 ];
 
 export const DEFAULT_INCOME_CATEGORIES: string[] = [
-  "งบสนับสนุน/ตั้งต้น",
-  "เก็บเงินสมทบ/สมาชิก",
-  "รายรับกิจกรรม",
-  "เงินคืน/อื่น ๆ",
+  "งบกิจกรรม/สนับสนุน",
+  "เก็บเงินสมาชิก",
+  "รายรับอื่น ๆ",
 ];
+
+export function createDefaultProject(): ActivityProject {
+  return {
+    id: DEFAULT_PROJECT_ID,
+    name: "กิจกรรมที่ 1",
+    organizationName: "",
+    budgetLimit: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+}
 
 export function createDefaultSettings(): LedgerSettings {
   return {
-    ledgerName: "สมุดงบเหรัญญิก",
-    organizationName: "ฝ่ายเหรัญญิก / บันทึกบิลและงบกิจกรรม",
-    startingBudget: 3000,
+    activeProjectId: DEFAULT_PROJECT_ID,
     expenseCategories: [...DEFAULT_EXPENSE_CATEGORIES],
     incomeCategories: [...DEFAULT_INCOME_CATEGORIES],
   };
@@ -244,6 +244,7 @@ export function subscribeStorageChange(callback: () => void): () => void {
   const handleStorage = (e: StorageEvent) => {
     if (
       e.key === null ||
+      e.key === STORAGE_KEYS.PROJECTS ||
       e.key === STORAGE_KEYS.ENTRIES ||
       e.key === STORAGE_KEYS.SETTINGS
     ) {
@@ -258,7 +259,46 @@ export function subscribeStorageChange(callback: () => void): () => void {
   };
 }
 
-function normalizeEntry(raw: unknown): LedgerEntry | null {
+function normalizeProject(raw: unknown): ActivityProject | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const id =
+    typeof obj.id === "string" && obj.id.trim()
+      ? obj.id.trim()
+      : generateId("proj");
+  const name =
+    typeof obj.name === "string" && obj.name.trim()
+      ? obj.name.trim()
+      : "กิจกรรมไม่มีชื่อ";
+  const organizationName =
+    typeof obj.organizationName === "string" ? obj.organizationName.trim() : "";
+  const budgetLimit =
+    typeof obj.budgetLimit === "number" &&
+    Number.isFinite(obj.budgetLimit) &&
+    obj.budgetLimit >= 0
+      ? roundCurrency(obj.budgetLimit)
+      : 0;
+  const createdAt =
+    typeof obj.createdAt === "string" && obj.createdAt
+      ? obj.createdAt
+      : "2026-01-01T00:00:00.000Z";
+  return { id, name, organizationName, budgetLimit, createdAt };
+}
+
+function normalizeProjects(input: unknown): ActivityProject[] {
+  if (!Array.isArray(input)) return [createDefaultProject()];
+  const result: ActivityProject[] = [];
+  for (const row of input) {
+    const proj = normalizeProject(row);
+    if (proj) result.push(proj);
+  }
+  return result.length > 0 ? result : [createDefaultProject()];
+}
+
+function normalizeEntry(
+  raw: unknown,
+  fallbackProjectId: string
+): LedgerEntry | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
   const type: EntryType = obj.type === "income" ? "income" : "expense";
@@ -275,8 +315,8 @@ function normalizeEntry(raw: unknown): LedgerEntry | null {
     typeof obj.category === "string" && obj.category.trim()
       ? obj.category.trim()
       : type === "income"
-      ? "เงินคืน/อื่น ๆ"
-      : "ค่าใช้จ่ายอื่น ๆ";
+      ? "รายรับอื่น ๆ"
+      : "อื่น ๆ";
   const rawChannel = obj.channel;
   const channel: PaymentChannel =
     rawChannel === "make" ||
@@ -291,6 +331,11 @@ function normalizeEntry(raw: unknown): LedgerEntry | null {
     typeof obj.personName === "string" ? obj.personName.trim() : "";
   const reimburseStatus: ReimburseStatus =
     obj.reimburseStatus === "pending" ? "pending" : "settled";
+  const verified = Boolean(obj.verified);
+  const imageId =
+    typeof obj.imageId === "string" && obj.imageId.trim()
+      ? obj.imageId.trim()
+      : undefined;
   const note = typeof obj.note === "string" ? obj.note.trim() : "";
   const createdAt =
     typeof obj.createdAt === "string" && obj.createdAt
@@ -304,9 +349,14 @@ function normalizeEntry(raw: unknown): LedgerEntry | null {
     typeof obj.dateKey === "string" && /^\d{4}-\d{2}-\d{2}$/.test(obj.dateKey)
       ? obj.dateKey
       : getThailandDateKey(createdAt);
+  const projectId =
+    typeof obj.projectId === "string" && obj.projectId.trim()
+      ? obj.projectId.trim()
+      : fallbackProjectId;
 
   return {
     id: typeof obj.id === "string" && obj.id ? obj.id : generateId("tx"),
+    projectId,
     type,
     title,
     amount,
@@ -316,6 +366,8 @@ function normalizeEntry(raw: unknown): LedgerEntry | null {
     receiptRef,
     personName,
     reimburseStatus,
+    verified,
+    ...(imageId ? { imageId } : {}),
     note,
     dateKey,
     createdAt,
@@ -323,11 +375,14 @@ function normalizeEntry(raw: unknown): LedgerEntry | null {
   };
 }
 
-function normalizeEntries(input: unknown): LedgerEntry[] {
+function normalizeEntries(
+  input: unknown,
+  fallbackProjectId: string
+): LedgerEntry[] {
   if (!Array.isArray(input)) return [];
   const normalized: LedgerEntry[] = [];
   for (const row of input) {
-    const entry = normalizeEntry(row);
+    const entry = normalizeEntry(row, fallbackProjectId);
     if (entry) normalized.push(entry);
   }
   return normalized;
@@ -353,23 +408,11 @@ function normalizeSettings(input: unknown): LedgerSettings {
   const defaults = createDefaultSettings();
   if (!input || typeof input !== "object") return defaults;
   const obj = input as Record<string, unknown>;
-  const startingBudget =
-    typeof obj.startingBudget === "number" &&
-    Number.isFinite(obj.startingBudget) &&
-    obj.startingBudget >= 0
-      ? roundCurrency(obj.startingBudget)
-      : defaults.startingBudget;
-
   return {
-    ledgerName:
-      typeof obj.ledgerName === "string" && obj.ledgerName.trim()
-        ? obj.ledgerName.trim()
-        : defaults.ledgerName,
-    organizationName:
-      typeof obj.organizationName === "string"
-        ? obj.organizationName.trim()
-        : defaults.organizationName,
-    startingBudget,
+    activeProjectId:
+      typeof obj.activeProjectId === "string" && obj.activeProjectId.trim()
+        ? obj.activeProjectId.trim()
+        : defaults.activeProjectId,
     expenseCategories: normalizeCategoryList(
       obj.expenseCategories,
       defaults.expenseCategories
@@ -385,14 +428,109 @@ function normalizeSettings(input: unknown): LedgerSettings {
 // Snapshot Caching for useSyncExternalStore
 // ----------------------------------------------------------------------------
 
+const SERVER_PROJECTS_SNAPSHOT: ActivityProject[] = [createDefaultProject()];
 const SERVER_ENTRIES_SNAPSHOT: LedgerEntry[] = [];
 const SERVER_SETTINGS_SNAPSHOT: LedgerSettings = createDefaultSettings();
+
+let cachedProjectsRaw: string | null = null;
+let cachedProjectsValue: ActivityProject[] = SERVER_PROJECTS_SNAPSHOT;
 
 let cachedEntriesRaw: string | null = null;
 let cachedEntriesValue: LedgerEntry[] = SERVER_ENTRIES_SNAPSHOT;
 
 let cachedSettingsRaw: string | null = null;
 let cachedSettingsValue: LedgerSettings = SERVER_SETTINGS_SNAPSHOT;
+
+// ----------------------------------------------------------------------------
+// Projects CRUD
+// ----------------------------------------------------------------------------
+
+export function getProjects(): ActivityProject[] {
+  if (!isBrowser()) return SERVER_PROJECTS_SNAPSHOT;
+  const raw = window.localStorage.getItem(STORAGE_KEYS.PROJECTS);
+  if (raw === null) {
+    const initial = [createDefaultProject()];
+    const str = JSON.stringify(initial);
+    window.localStorage.setItem(STORAGE_KEYS.PROJECTS, str);
+    cachedProjectsRaw = str;
+    cachedProjectsValue = initial;
+    return initial;
+  }
+  return normalizeProjects(safeParseJson<unknown>(raw));
+}
+
+export function saveProjects(projects: ActivityProject[]): void {
+  if (!isBrowser()) return;
+  const safe = projects.length > 0 ? projects : [createDefaultProject()];
+  const str = JSON.stringify(safe);
+  window.localStorage.setItem(STORAGE_KEYS.PROJECTS, str);
+  cachedProjectsRaw = str;
+  cachedProjectsValue = safe;
+  notifyStorageChange();
+}
+
+export function addProject(input: {
+  name: string;
+  organizationName?: string;
+  budgetLimit?: number;
+}): ActivityProject {
+  const projects = getProjects();
+  const newProj: ActivityProject = {
+    id: generateId("proj"),
+    name: input.name.trim() || `กิจกรรมที่ ${projects.length + 1}`,
+    organizationName: input.organizationName?.trim() ?? "",
+    budgetLimit: roundCurrency(Math.max(0, input.budgetLimit ?? 0)),
+    createdAt: new Date().toISOString(),
+  };
+  saveProjects([...projects, newProj]);
+  const settings = getSettings();
+  saveSettings({ ...settings, activeProjectId: newProj.id });
+  return newProj;
+}
+
+export function updateProject(
+  id: string,
+  patch: { name: string; organizationName: string; budgetLimit: number }
+): void {
+  const projects = getProjects();
+  const next = projects.map((p) =>
+    p.id === id
+      ? {
+          ...p,
+          name: patch.name.trim() || p.name,
+          organizationName: patch.organizationName.trim(),
+          budgetLimit: roundCurrency(Math.max(0, patch.budgetLimit)),
+        }
+      : p
+  );
+  saveProjects(next);
+}
+
+export function deleteProject(id: string): void {
+  const projects = getProjects();
+  if (projects.length <= 1) return; // Always keep at least 1 project
+
+  // Clean up entries + images belonging to this project
+  const entries = getEntries();
+  const toDelete = entries.filter((e) => e.projectId === id);
+  for (const e of toDelete) {
+    if (e.imageId) void deleteReceiptImage(e.imageId);
+  }
+  saveEntries(entries.filter((e) => e.projectId !== id));
+
+  const nextProjects = projects.filter((p) => p.id !== id);
+  saveProjects(nextProjects);
+
+  const settings = getSettings();
+  if (settings.activeProjectId === id) {
+    saveSettings({ ...settings, activeProjectId: nextProjects[0].id });
+  }
+}
+
+export function setActiveProjectId(projectId: string): void {
+  const settings = getSettings();
+  saveSettings({ ...settings, activeProjectId: projectId });
+}
 
 // ----------------------------------------------------------------------------
 // Entries CRUD
@@ -407,8 +545,7 @@ export function getEntries(): LedgerEntry[] {
     cachedEntriesValue = [];
     return [];
   }
-  const parsed = safeParseJson<unknown>(raw);
-  return normalizeEntries(parsed);
+  return normalizeEntries(safeParseJson<unknown>(raw), DEFAULT_PROJECT_ID);
 }
 
 export function saveEntries(entries: LedgerEntry[]): void {
@@ -430,17 +567,20 @@ export function addEntry(input: NewLedgerEntryInput): LedgerEntry[] {
 
   const newEntry: LedgerEntry = {
     id: generateId("tx"),
+    projectId: input.projectId || DEFAULT_PROJECT_ID,
     type: input.type,
     title: input.title.trim() || "ไม่ระบุรายการ",
     amount: roundCurrency(Math.max(0, input.amount)),
     ...(input.formula && input.formula.trim()
       ? { formula: input.formula.trim() }
       : {}),
-    category: input.category.trim() || "ค่าใช้จ่ายอื่น ๆ",
+    category: input.category.trim() || "อื่น ๆ",
     channel: input.channel,
     receiptRef: input.receiptRef.trim(),
     personName: input.personName.trim(),
     reimburseStatus: input.reimburseStatus,
+    verified: Boolean(input.verified),
+    ...(input.imageId ? { imageId: input.imageId } : {}),
     note: input.note.trim(),
     dateKey,
     createdAt: nowIso,
@@ -470,6 +610,7 @@ export function updateEntry(
       receiptRef: patch.receiptRef.trim(),
       personName: patch.personName.trim(),
       reimburseStatus: patch.reimburseStatus,
+      verified: patch.verified ?? entry.verified,
       note: patch.note.trim(),
       dateKey: /^\d{4}-\d{2}-\d{2}$/.test(patch.dateKey)
         ? patch.dateKey
@@ -481,8 +622,24 @@ export function updateEntry(
     } else {
       delete updated.formula;
     }
+    if (patch.imageId !== undefined) {
+      if (patch.imageId) updated.imageId = patch.imageId;
+      else delete updated.imageId;
+    }
     return updated;
   });
+  saveEntries(next);
+  return next;
+}
+
+export function toggleEntryVerified(id: string): LedgerEntry[] {
+  const existing = getEntries();
+  const nowIso = new Date().toISOString();
+  const next = existing.map((entry) =>
+    entry.id === id
+      ? { ...entry, verified: !entry.verified, updatedAt: nowIso }
+      : entry
+  );
   saveEntries(next);
   return next;
 }
@@ -506,12 +663,16 @@ export function toggleReimburseStatus(id: string): LedgerEntry[] {
   return next;
 }
 
-export function settlePersonPending(personName: string): LedgerEntry[] {
+export function settlePersonPending(
+  projectId: string,
+  personName: string
+): LedgerEntry[] {
   const target = personName.trim();
   const existing = getEntries();
   const nowIso = new Date().toISOString();
   const next = existing.map((entry) => {
     if (
+      entry.projectId === projectId &&
       entry.reimburseStatus === "pending" &&
       (entry.personName.trim() || "ไม่ระบุชื่อ") === target
     ) {
@@ -528,14 +689,26 @@ export function settlePersonPending(personName: string): LedgerEntry[] {
 }
 
 export function deleteEntry(id: string): LedgerEntry[] {
-  const next = getEntries().filter((entry) => entry.id !== id);
+  const existing = getEntries();
+  const target = existing.find((e) => e.id === id);
+  if (target?.imageId) {
+    void deleteReceiptImage(target.imageId);
+  }
+  const next = existing.filter((entry) => entry.id !== id);
   saveEntries(next);
   return next;
 }
 
-export function clearAllEntries(): LedgerEntry[] {
-  saveEntries([]);
-  return [];
+export function clearProjectEntries(projectId: string): LedgerEntry[] {
+  const existing = getEntries();
+  for (const e of existing) {
+    if (e.projectId === projectId && e.imageId) {
+      void deleteReceiptImage(e.imageId);
+    }
+  }
+  const next = existing.filter((entry) => entry.projectId !== projectId);
+  saveEntries(next);
+  return next;
 }
 
 // ----------------------------------------------------------------------------
@@ -567,13 +740,14 @@ export function saveSettings(settings: LedgerSettings): void {
 }
 
 // ----------------------------------------------------------------------------
-// Snapshot Export / Import & Legacy Booth Note Importer
+// Snapshot Export / Import
 // ----------------------------------------------------------------------------
 
 export function exportAllData(): LedgerDataSnapshot {
   return {
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
+    projects: getProjects(),
     entries: getEntries(),
     settings: getSettings(),
   };
@@ -590,193 +764,62 @@ export function importAllData(rawJson: string): LedgerDataSnapshot {
     throw new Error("โครงสร้างไฟล์สำรองข้อมูลไม่ถูกต้อง");
   }
   const obj = parsed as Record<string, unknown>;
-
-  // Support importing either v2 Treasurer format OR v1 Booth Note backup JSON
-  let entries: LedgerEntry[] = [];
-  let settings: LedgerSettings = getSettings();
-
-  if (Array.isArray(obj.entries)) {
-    entries = normalizeEntries(obj.entries);
-    if (obj.settings) {
-      settings = normalizeSettings(obj.settings);
-    }
-  } else if (Array.isArray(obj.expenses) || Array.isArray(obj.orders)) {
-    // Convert legacy Booth Note JSON snapshot smoothly
-    const legacyExpenses = Array.isArray(obj.expenses) ? obj.expenses : [];
-    const legacyOrders = Array.isArray(obj.orders) ? obj.orders : [];
-    const convertedExpenses: LedgerEntry[] = [];
-
-    for (const row of legacyExpenses) {
-      if (!row || typeof row !== "object") continue;
-      const r = row as Record<string, unknown>;
-      const createdAt =
-        typeof r.createdAt === "string"
-          ? r.createdAt
-          : new Date().toISOString();
-      const dateKey =
-        typeof r.dateKey === "string"
-          ? r.dateKey
-          : getThailandDateKey(createdAt);
-      convertedExpenses.push({
-        id: typeof r.id === "string" ? `imp_${r.id}` : generateId("tx"),
-        type: "expense",
-        title: typeof r.title === "string" ? r.title : "รายจ่ายจาก Booth Note",
-        amount: roundCurrency(Math.max(0, Number(r.amount) || 0)),
-        category: "ค่าวัสดุ/อุปกรณ์",
-        channel: "make",
-        receiptRef: "",
-        personName: "",
-        reimburseStatus: "settled",
-        note: "นำเข้าจากไฟล์สำรอง Booth Note",
-        dateKey,
-        createdAt,
-        updatedAt: createdAt,
-      });
-    }
-
-    // Aggregate legacy non-void/non-waste sales per day as income entries
-    const salesByDay = new Map<string, { make: number; cash: number; cups: number }>();
-    for (const row of legacyOrders) {
-      if (!row || typeof row !== "object") continue;
-      const r = row as Record<string, unknown>;
-      if (r.status === "void" || r.status === "waste") continue;
-      const dateKey =
-        typeof r.dateKey === "string" ? r.dateKey : getThailandDateKey();
-      const amount = roundCurrency(Math.max(0, Number(r.totalAmount) || 0));
-      const cur = salesByDay.get(dateKey) ?? { make: 0, cash: 0, cups: 0 };
-      if (r.paymentMethod === "cash") cur.cash += amount;
-      else cur.make += amount;
-      cur.cups += 1;
-      salesByDay.set(dateKey, cur);
-    }
-
-    const convertedSales: LedgerEntry[] = [];
-    for (const [dateKey, totals] of salesByDay.entries()) {
-      if (totals.make > 0) {
-        convertedSales.push({
-          id: generateId("tx"),
-          type: "income",
-          title: `ยอดขายบูธโอน MAKE (${formatThaiDateLabel(dateKey)})`,
-          amount: roundCurrency(totals.make),
-          category: "รายรับกิจกรรม",
-          channel: "make",
-          receiptRef: `BOOTH-${dateKey}`,
-          personName: "",
-          reimburseStatus: "settled",
-          note: "นำเข้ายอดขายโอนจาก Booth Note",
-          dateKey,
-          createdAt: `${dateKey}T20:00:00.000+07:00`,
-          updatedAt: new Date().toISOString(),
-        });
-      }
-      if (totals.cash > 0) {
-        convertedSales.push({
-          id: generateId("tx"),
-          type: "income",
-          title: `ยอดขายบูธเงินสด (${formatThaiDateLabel(dateKey)})`,
-          amount: roundCurrency(totals.cash),
-          category: "รายรับกิจกรรม",
-          channel: "cash",
-          receiptRef: `BOOTH-CASH-${dateKey}`,
-          personName: "",
-          reimburseStatus: "settled",
-          note: "นำเข้ายอดขายเงินสดจาก Booth Note",
-          dateKey,
-          createdAt: `${dateKey}T20:05:00.000+07:00`,
-          updatedAt: new Date().toISOString(),
-        });
-      }
-    }
-
-    entries = [...convertedSales, ...convertedExpenses].sort((a, b) =>
-      b.createdAt.localeCompare(a.createdAt)
-    );
-    if (obj.settings && typeof obj.settings === "object") {
-      const s = obj.settings as Record<string, unknown>;
-      settings = {
-        ...createDefaultSettings(),
-        ledgerName:
-          typeof s.boothName === "string" && s.boothName.trim()
-            ? s.boothName.trim()
-            : "สมุดงบเหรัญญิก",
-        startingBudget:
-          typeof s.budgetLimit === "number" && s.budgetLimit >= 0
-            ? roundCurrency(s.budgetLimit)
-            : 3000,
-      };
-    }
-  } else {
-    throw new Error("ไม่พบข้อมูล entries ในไฟล์สำรองข้อมูล");
+  if (!Array.isArray(obj.entries)) {
+    throw new Error("ไม่พบข้อมูลรายการในไฟล์สำรอง");
   }
 
+  const projects = Array.isArray(obj.projects)
+    ? normalizeProjects(obj.projects)
+    : getProjects();
+  const fallbackProjId = projects[0]?.id ?? DEFAULT_PROJECT_ID;
+  const entries = normalizeEntries(obj.entries, fallbackProjId);
+  const settings = obj.settings
+    ? normalizeSettings(obj.settings)
+    : getSettings();
+
+  if (!projects.some((p) => p.id === settings.activeProjectId)) {
+    settings.activeProjectId = fallbackProjId;
+  }
+
+  saveProjects(projects);
   saveEntries(entries);
   saveSettings(settings);
 
   return {
-    version: 2,
+    version: 3,
     exportedAt:
       typeof obj.exportedAt === "string"
         ? obj.exportedAt
         : new Date().toISOString(),
+    projects,
     entries,
     settings,
   };
 }
 
-export function getLegacyBoothSummary(): LegacyBoothSummary | null {
-  if (!isBrowser()) return null;
-  const rawExp = window.localStorage.getItem(STORAGE_KEYS.LEGACY_BOOTH_EXPENSES);
-  const rawOrd = window.localStorage.getItem(STORAGE_KEYS.LEGACY_BOOTH_ORDERS);
-  const expenses = safeParseJson<unknown[]>(rawExp) ?? [];
-  const orders = safeParseJson<unknown[]>(rawOrd) ?? [];
-  if (!Array.isArray(expenses) && !Array.isArray(orders)) return null;
-
-  let expensesCount = 0;
-  let expensesTotal = 0;
-  for (const row of expenses) {
-    if (row && typeof row === "object") {
-      expensesCount += 1;
-      expensesTotal += Number((row as Record<string, unknown>).amount) || 0;
-    }
-  }
-
-  let ordersCount = 0;
-  let salesTotal = 0;
-  for (const row of orders) {
-    if (row && typeof row === "object") {
-      const r = row as Record<string, unknown>;
-      if (r.status === "void" || r.status === "waste") continue;
-      ordersCount += 1;
-      salesTotal += Number(r.totalAmount) || 0;
-    }
-  }
-
-  if (expensesCount === 0 && ordersCount === 0) return null;
-  return {
-    expensesCount,
-    expensesTotal: roundCurrency(expensesTotal),
-    ordersCount,
-    salesTotal: roundCurrency(salesTotal),
-  };
-}
-
-export function importLegacyBoothFromDevice(): number {
-  if (!isBrowser()) return 0;
-  const rawExp = window.localStorage.getItem(STORAGE_KEYS.LEGACY_BOOTH_EXPENSES);
-  const rawOrd = window.localStorage.getItem(STORAGE_KEYS.LEGACY_BOOTH_ORDERS);
-  const rawSet = window.localStorage.getItem(STORAGE_KEYS.LEGACY_BOOTH_SETTINGS);
-  const payload = JSON.stringify({
-    expenses: safeParseJson<unknown[]>(rawExp) ?? [],
-    orders: safeParseJson<unknown[]>(rawOrd) ?? [],
-    settings: safeParseJson<Record<string, unknown>>(rawSet) ?? {},
-  });
-  const imported = importAllData(payload);
-  return imported.entries.length;
-}
-
 // ----------------------------------------------------------------------------
 // Snapshot Getters for React useSyncExternalStore
 // ----------------------------------------------------------------------------
+
+export function getProjectsSnapshot(): ActivityProject[] {
+  if (!isBrowser()) return SERVER_PROJECTS_SNAPSHOT;
+  let raw = window.localStorage.getItem(STORAGE_KEYS.PROJECTS);
+  if (raw === null) {
+    const seeded = getProjects();
+    raw = window.localStorage.getItem(STORAGE_KEYS.PROJECTS);
+    cachedProjectsRaw = raw;
+    cachedProjectsValue = seeded;
+    return cachedProjectsValue;
+  }
+  if (raw === cachedProjectsRaw) return cachedProjectsValue;
+  cachedProjectsRaw = raw;
+  cachedProjectsValue = getProjects();
+  return cachedProjectsValue;
+}
+
+export function getServerProjectsSnapshot(): ActivityProject[] {
+  return SERVER_PROJECTS_SNAPSHOT;
+}
 
 export function getEntriesSnapshot(): LedgerEntry[] {
   if (!isBrowser()) return SERVER_ENTRIES_SNAPSHOT;
@@ -788,9 +831,7 @@ export function getEntriesSnapshot(): LedgerEntry[] {
     cachedEntriesValue = seeded;
     return cachedEntriesValue;
   }
-  if (raw === cachedEntriesRaw) {
-    return cachedEntriesValue;
-  }
+  if (raw === cachedEntriesRaw) return cachedEntriesValue;
   cachedEntriesRaw = raw;
   cachedEntriesValue = getEntries();
   return cachedEntriesValue;
@@ -810,9 +851,7 @@ export function getSettingsSnapshot(): LedgerSettings {
     cachedSettingsValue = seeded;
     return cachedSettingsValue;
   }
-  if (raw === cachedSettingsRaw) {
-    return cachedSettingsValue;
-  }
+  if (raw === cachedSettingsRaw) return cachedSettingsValue;
   cachedSettingsRaw = raw;
   cachedSettingsValue = getSettings();
   return cachedSettingsValue;

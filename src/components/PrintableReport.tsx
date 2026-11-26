@@ -2,9 +2,9 @@
 
 import React from "react";
 import {
+  ActivityProject,
   CHANNEL_LABELS,
   LedgerEntry,
-  LedgerSettings,
   formatBaht,
   formatThaiDateFull,
   formatThaiDateLabel,
@@ -12,14 +12,14 @@ import {
 } from "@/lib/storage";
 
 interface PrintableReportProps {
-  settings: LedgerSettings;
+  project: ActivityProject;
   entries: LedgerEntry[];
   dateRangeLabel: string;
   generatedDateLabel: string;
 }
 
 export function PrintableReport({
-  settings,
+  project,
   entries,
   dateRangeLabel,
   generatedDateLabel,
@@ -65,7 +65,8 @@ export function PrintableReport({
     }
   }
 
-  const totalPool = roundCurrency(settings.startingBudget + totalIncome);
+  const hasBudget = project.budgetLimit > 0;
+  const totalPool = roundCurrency(project.budgetLimit + totalIncome);
   const netBalance = roundCurrency(totalPool - totalExpense);
 
   const expenseCategories = Array.from(expenseByCategory.entries()).sort(
@@ -84,18 +85,21 @@ export function PrintableReport({
       <div className="border-b-2 border-stone-800 pb-4 mb-5 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">
-            รายงานสรุปบัญชีรายรับ-รายจ่าย &amp; งบประมาณ
+            ใบสรุปรายรับ-รายจ่ายกิจกรรม
           </p>
           <h1 className="text-xl font-bold text-stone-900 mt-0.5">
-            {settings.ledgerName}
+            {project.name}
           </h1>
-          {settings.organizationName && (
-            <p className="text-xs text-stone-600">{settings.organizationName}</p>
+          {project.organizationName && (
+            <p className="text-xs text-stone-600">{project.organizationName}</p>
           )}
         </div>
         <div className="text-xs text-stone-600 sm:text-right space-y-0.5">
           <div>
-            ช่วงข้อมูล: <span className="font-semibold text-stone-900">{dateRangeLabel}</span>
+            ช่วงข้อมูล:{" "}
+            <span className="font-semibold text-stone-900">
+              {dateRangeLabel}
+            </span>
           </div>
           <div>
             วันที่จัดทำรายงาน:{" "}
@@ -104,34 +108,50 @@ export function PrintableReport({
             </span>
           </div>
           <div>
-            จำนวนรายการทั้งหมด:{" "}
-            <span className="font-semibold text-stone-900">{sortedAsc.length} บิล</span>
+            จำนวนรายการ:{" "}
+            <span className="font-semibold text-stone-900">
+              {sortedAsc.length} รายการ
+            </span>
           </div>
         </div>
       </div>
 
-      {/* 4 Summary Boxes */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5 break-inside-avoid">
-        <div className="border border-stone-300 rounded-lg p-3 bg-stone-50/70">
-          <div className="text-[11px] text-stone-500 font-medium">งบตั้งต้น</div>
-          <div className="text-base font-bold text-stone-900 tabular-nums mt-0.5">
-            ฿{formatBaht(settings.startingBudget)}
+      {/* Summary Boxes */}
+      <div
+        className={`grid grid-cols-1 ${
+          hasBudget ? "sm:grid-cols-4" : "sm:grid-cols-3"
+        } gap-3 mb-5 break-inside-avoid`}
+      >
+        {hasBudget && (
+          <div className="border border-stone-300 rounded-lg p-3 bg-stone-50/70">
+            <div className="text-[11px] text-stone-500 font-medium">
+              งบตั้งต้น
+            </div>
+            <div className="text-base font-bold text-stone-900 tabular-nums mt-0.5">
+              ฿{formatBaht(project.budgetLimit)}
+            </div>
           </div>
-        </div>
+        )}
         <div className="border border-emerald-300 rounded-lg p-3 bg-emerald-50/50">
-          <div className="text-[11px] text-emerald-700 font-medium">รายรับเพิ่มเติม</div>
+          <div className="text-[11px] text-emerald-700 font-medium">
+            รายรับรวม
+          </div>
           <div className="text-base font-bold text-emerald-800 tabular-nums mt-0.5">
             +฿{formatBaht(totalIncome)}
           </div>
         </div>
         <div className="border border-rose-300 rounded-lg p-3 bg-rose-50/50">
-          <div className="text-[11px] text-rose-700 font-medium">รายจ่ายรวม</div>
+          <div className="text-[11px] text-rose-700 font-medium">
+            รายจ่ายรวม
+          </div>
           <div className="text-base font-bold text-rose-800 tabular-nums mt-0.5">
             -฿{formatBaht(totalExpense)}
           </div>
         </div>
         <div className="border-2 border-stone-800 rounded-lg p-3 bg-amber-50/60">
-          <div className="text-[11px] text-stone-700 font-semibold">ยอดคงเหลือสุทธิ</div>
+          <div className="text-[11px] text-stone-700 font-semibold">
+            ยอดคงเหลือสุทธิ
+          </div>
           <div
             className={`text-base font-bold tabular-nums mt-0.5 ${
               netBalance < 0 ? "text-rose-700" : "text-stone-900"
@@ -143,48 +163,30 @@ export function PrintableReport({
       </div>
 
       {/* Category & Reimbursement Summaries */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 break-inside-avoid">
-        <div className="border border-stone-300 rounded-lg p-3.5">
-          <h2 className="text-xs font-bold text-stone-800 border-b border-stone-200 pb-1.5 mb-2">
-            สรุปรายจ่ายแยกตามหมวดหมู่
-          </h2>
-          {expenseCategories.length === 0 ? (
-            <p className="text-xs text-stone-400">ไม่มีรายการรายจ่ายในช่วงนี้</p>
-          ) : (
-            <table className="w-full text-xs">
-              <tbody>
-                {expenseCategories.map(([cat, stat]) => (
-                  <tr key={cat} className="border-b border-stone-100 last:border-0">
-                    <td className="py-1 text-stone-700">
-                      {cat} <span className="text-stone-400">({stat.count})</span>
-                    </td>
-                    <td className="py-1 text-right font-semibold tabular-nums text-stone-900">
-                      ฿{formatBaht(stat.amount)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        <div className="border border-stone-300 rounded-lg p-3.5 space-y-3">
-          <div>
+      {(expenseCategories.length > 0 ||
+        incomeCategories.length > 0 ||
+        pendingCount > 0) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 break-inside-avoid">
+          <div className="border border-stone-300 rounded-lg p-3.5">
             <h2 className="text-xs font-bold text-stone-800 border-b border-stone-200 pb-1.5 mb-2">
-              สรุปรายรับแยกตามหมวดหมู่
+              สรุปรายจ่ายแยกตามหมวดหมู่
             </h2>
-            {incomeCategories.length === 0 ? (
-              <p className="text-xs text-stone-400">ไม่มีรายการรายรับเพิ่มเติม</p>
+            {expenseCategories.length === 0 ? (
+              <p className="text-xs text-stone-400">ไม่มีรายการรายจ่าย</p>
             ) : (
               <table className="w-full text-xs">
                 <tbody>
-                  {incomeCategories.map(([cat, stat]) => (
-                    <tr key={cat} className="border-b border-stone-100 last:border-0">
+                  {expenseCategories.map(([cat, stat]) => (
+                    <tr
+                      key={cat}
+                      className="border-b border-stone-100 last:border-0"
+                    >
                       <td className="py-1 text-stone-700">
-                        {cat} <span className="text-stone-400">({stat.count})</span>
+                        {cat}{" "}
+                        <span className="text-stone-400">({stat.count})</span>
                       </td>
-                      <td className="py-1 text-right font-semibold tabular-nums text-emerald-700">
-                        +฿{formatBaht(stat.amount)}
+                      <td className="py-1 text-right font-semibold tabular-nums text-stone-900">
+                        ฿{formatBaht(stat.amount)}
                       </td>
                     </tr>
                   ))}
@@ -193,34 +195,65 @@ export function PrintableReport({
             )}
           </div>
 
-          {pendingCount > 0 && (
-            <div className="pt-2 border-t border-stone-200">
-              <h2 className="text-xs font-bold text-amber-900 mb-1.5">
-                ยอดสำรองจ่ายรอโอนคืน ({pendingCount} บิล · ฿{formatBaht(pendingTotal)})
+          <div className="border border-stone-300 rounded-lg p-3.5 space-y-3">
+            <div>
+              <h2 className="text-xs font-bold text-stone-800 border-b border-stone-200 pb-1.5 mb-2">
+                สรุปรายรับแยกตามหมวดหมู่
               </h2>
-              <table className="w-full text-xs">
-                <tbody>
-                  {pendingPersons.map(([person, stat]) => (
-                    <tr key={person}>
-                      <td className="py-0.5 text-stone-700">
-                        {person} ({stat.count} บิล)
-                      </td>
-                      <td className="py-0.5 text-right font-semibold tabular-nums text-amber-800">
-                        ฿{formatBaht(stat.amount)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {incomeCategories.length === 0 ? (
+                <p className="text-xs text-stone-400">ไม่มีรายการรายรับ</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <tbody>
+                    {incomeCategories.map(([cat, stat]) => (
+                      <tr
+                        key={cat}
+                        className="border-b border-stone-100 last:border-0"
+                      >
+                        <td className="py-1 text-stone-700">
+                          {cat}{" "}
+                          <span className="text-stone-400">({stat.count})</span>
+                        </td>
+                        <td className="py-1 text-right font-semibold tabular-nums text-emerald-700">
+                          +฿{formatBaht(stat.amount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
-          )}
+
+            {pendingCount > 0 && (
+              <div className="pt-2 border-t border-stone-200">
+                <h2 className="text-xs font-bold text-amber-900 mb-1.5">
+                  ยอดสำรองจ่ายรอโอนคืน ({pendingCount} บิล · ฿
+                  {formatBaht(pendingTotal)})
+                </h2>
+                <table className="w-full text-xs">
+                  <tbody>
+                    {pendingPersons.map(([person, stat]) => (
+                      <tr key={person}>
+                        <td className="py-0.5 text-stone-700">
+                          {person} ({stat.count} บิล)
+                        </td>
+                        <td className="py-0.5 text-right font-semibold tabular-nums text-amber-800">
+                          ฿{formatBaht(stat.amount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Itemized Ledger Table */}
       <div className="mb-8">
         <h2 className="text-xs font-bold text-stone-800 mb-2">
-          รายละเอียดบิลและหลักฐานอ้างอิง
+          รายละเอียดบิลและเอกสารอ้างอิง
         </h2>
         {sortedAsc.length === 0 ? (
           <div className="border border-stone-300 rounded-lg p-6 text-center text-xs text-stone-500">
@@ -266,10 +299,13 @@ export function PrintableReport({
                     {entry.receiptRef || "-"}
                   </td>
                   <td className="border border-stone-300 px-2 py-1.5">
-                    <div className="font-semibold text-stone-900">{entry.title}</div>
+                    <div className="font-semibold text-stone-900">
+                      {entry.title}
+                    </div>
                     <div className="text-[10.5px] text-stone-500">
-                      หมวด: {entry.category}
+                      {entry.category}
                       {entry.formula ? ` · สูตร (${entry.formula})` : ""}
+                      {entry.imageId ? " · แนบรูปบิล" : ""}
                       {entry.note ? ` · ${entry.note}` : ""}
                     </div>
                   </td>
@@ -295,7 +331,10 @@ export function PrintableReport({
                   colSpan={5}
                   className="border border-stone-300 px-2 py-2 text-right"
                 >
-                  รวมทั้งสิ้น (งบตั้งต้น ฿{formatBaht(settings.startingBudget)} + รายรับ - รายจ่าย = คงเหลือ ฿{formatBaht(netBalance)})
+                  รวมทั้งสิ้น (
+                  {hasBudget ? `งบตั้งต้น ฿${formatBaht(project.budgetLimit)} · ` : ""}
+                  คงเหลือสุทธิ {netBalance < 0 ? "-" : ""}฿
+                  {formatBaht(Math.abs(netBalance))})
                 </td>
                 <td className="border border-stone-300 px-2 py-2 text-right tabular-nums text-emerald-800">
                   {formatBaht(totalIncome)}
@@ -312,29 +351,33 @@ export function PrintableReport({
       {/* Signature Block */}
       <div className="grid grid-cols-2 gap-8 pt-6 mt-4 border-t border-stone-200 break-inside-avoid text-xs text-stone-700">
         <div className="text-center space-y-8">
-          <p>ลงชื่อ ............................................................ ผู้จัดทำ / เหรัญญิก</p>
+          <p>
+            ลงชื่อ ............................................................
+            ผู้จัดทำ / เหรัญญิก
+          </p>
           <p>( ............................................................ )</p>
           <p>วันที่ .......... / .................... / ....................</p>
         </div>
         <div className="text-center space-y-8">
-          <p>ลงชื่อ ............................................................ ผู้ตรวจสอบ / ประธานกิจกรรม</p>
+          <p>
+            ลงชื่อ ............................................................
+            ผู้ตรวจสอบ / ประธานกิจกรรม
+          </p>
           <p>( ............................................................ )</p>
           <p>วันที่ .......... / .................... / ....................</p>
         </div>
       </div>
 
       <div className="mt-6 text-[10px] text-stone-400 text-right">
-        ออกรายงานจาก Treasurer Note
+        ออกรายงานเมื่อ {generatedDateLabel || "-"}
         {sortedAsc.length > 0
-          ? ` (${formatThaiDateFull(sortedAsc[0].dateKey)}${
+          ? ` · ข้อมูลช่วง ${formatThaiDateFull(sortedAsc[0].dateKey)}${
               sortedAsc.length > 1
                 ? ` – ${formatThaiDateFull(
                     sortedAsc[sortedAsc.length - 1].dateKey
                   )}`
                 : ""
-            })`
-          : generatedDateLabel
-          ? ` (${generatedDateLabel})`
+            }`
           : ""}
       </div>
     </div>

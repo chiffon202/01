@@ -1,4 +1,4 @@
-const CACHE_NAME = "treasurer-note-v1";
+const CACHE_NAME = "treasurer-note-v2";
 const APP_SHELL_URLS = [
   "/",
   "/manifest.webmanifest",
