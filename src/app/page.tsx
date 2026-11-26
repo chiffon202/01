@@ -1,5 +1,5 @@
-import { BoothNoteApp } from "@/components/BoothNoteApp";
+import { TreasurerApp } from "@/components/TreasurerApp";
 
 export default function HomePage() {
-  return <BoothNoteApp />;
+  return <TreasurerApp />;
 }

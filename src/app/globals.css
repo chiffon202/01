@@ -47,3 +47,17 @@ textarea {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #1c1917 !important;
+    overscroll-behavior-y: auto;
+  }
+}

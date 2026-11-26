@@ -2,10 +2,10 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Booth Note — จดออเดอร์ & คุมงบบูธ",
-    short_name: "Booth Note",
+    name: "Treasurer Note — สมุดงบเหรัญญิก & บันทึกบิล",
+    short_name: "Treasurer Note",
     description:
-      "แอปจดออเดอร์ คิวหน้าร้าน และคุมงบประมาณบูธขายของ ใช้งานออฟไลน์ได้ 100%",
+      "สมุดบัญชีรายรับ-รายจ่ายและคุมงบเหรัญญิก คิดเลขด่วนในตัว จดบิล และพิมพ์รายงาน PDF ได้แบบออฟไลน์ 100%",
     start_url: "/",
     scope: "/",
     display: "standalone",

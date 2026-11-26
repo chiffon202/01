@@ -18,15 +18,15 @@ const plusJakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Booth Note — จดออเดอร์ & คุมงบบูธ",
+  title: "Treasurer Note — สมุดงบเหรัญญิก & บันทึกบิล",
   description:
-    "เว็บแอปจดออเดอร์หน้าร้าน คิวสด และคุมงบประมาณบูธขายของ ใช้งานไวแบบ Mobile-First และทำงานออฟไลน์ 100%",
-  applicationName: "Booth Note",
+    "สมุดบัญชีรายรับ-รายจ่ายสำหรับเหรัญญิก จดบิล เลขที่อ้างอิง คนเบิก คิดเลขด่วนในตัว และพิมพ์ใบสรุปงบเป็น PDF ได้ทันทีแบบออฟไลน์ 100%",
+  applicationName: "Treasurer Note",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Booth Note",
+    title: "Treasurer Note",
   },
   formatDetection: {
     telephone: false,
